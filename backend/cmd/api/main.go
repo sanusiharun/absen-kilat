@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"github.com/sanusi/absen-kilat/backend/internal/db"
 	"github.com/sanusi/absen-kilat/backend/internal/repo"
 	"github.com/sanusi/absen-kilat/backend/internal/service"
+	"github.com/sanusi/absen-kilat/backend/internal/storage"
 	"github.com/sanusi/absen-kilat/backend/internal/transport"
 	"github.com/sanusi/absen-kilat/backend/pkg/httpx"
 )
@@ -42,9 +44,15 @@ func main() {
 
 	// Wire repositories and services.
 	userRepo := repo.NewUserRepository(pool)
+	attendanceRepo := repo.NewAttendanceRepository(pool)
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
+	attendanceSvc := service.NewAttendanceService(attendanceRepo, cfg.CutoffHour)
+
+	// photoStore adapts storage.Store to transport.photoStorer.
+	photoStore := &photoStoreAdapter{Dir: cfg.UploadDir}
 
 	authHandler := transport.NewAuthHandler(authSvc)
+	attendanceHandler := transport.NewAttendanceHandler(attendanceSvc, photoStore)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -65,6 +73,10 @@ func main() {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		authHandler.RegisterRoutes(r)
+		r.Group(func(r chi.Router) {
+			r.Use(transport.RequireAuth(authSvc))
+			attendanceHandler.RegisterRoutes(r)
+		})
 	})
 
 	addr := ":" + cfg.Port
@@ -91,6 +103,16 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
 	}
+}
+
+// photoStoreAdapter adapts storage.Store to transport.photoStorer.
+type photoStoreAdapter struct {
+	Dir string
+}
+
+// Store saves an uploaded photo and returns its relative path.
+func (a *photoStoreAdapter) Store(file multipart.File, header *multipart.FileHeader) (string, error) {
+	return storage.Store(a.Dir, file, header)
 }
 
 // newLogger builds a structured slog logger: JSON in production, text in development.
