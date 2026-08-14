@@ -1,0 +1,7 @@
+backend/uploads/
+*.db
+*.db-journal
+.env
+node_modules/
+.expo/
+dist/
