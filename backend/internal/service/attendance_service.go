@@ -146,12 +146,15 @@ func (s *AttendanceService) Get(ctx context.Context, id string) (*domain.Attenda
 	return s.repo.FindByID(ctx, id)
 }
 
-// statusFor derives on_time/late for a check-in.
+// statusFor derives on_time/late for a check-in. A check-in at or before
+// cutoffHour:00 (local) is on time; anything after is late.
 func (s *AttendanceService) statusFor(now time.Time, loc *time.Location) domain.AttendanceStatus {
-	if now.In(loc).Hour() <= s.cutoffHour {
-		return domain.StatusOnTime
+	local := now.In(loc)
+	cutoff := time.Date(local.Year(), local.Month(), local.Day(), s.cutoffHour, 0, 0, 0, loc)
+	if local.After(cutoff) {
+		return domain.StatusLate
 	}
-	return domain.StatusLate
+	return domain.StatusOnTime
 }
 
 // resolveNow returns the provided time (or time.Now) and location.
