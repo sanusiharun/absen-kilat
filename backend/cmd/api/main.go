@@ -47,12 +47,14 @@ func main() {
 	attendanceRepo := repo.NewAttendanceRepository(pool)
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
 	attendanceSvc := service.NewAttendanceService(attendanceRepo, cfg.CutoffHour)
+	profileSvc := service.NewProfileService(userRepo)
 
 	// photoStore adapts storage.Store to transport.photoStorer.
 	photoStore := &photoStoreAdapter{Dir: cfg.UploadDir}
 
 	authHandler := transport.NewAuthHandler(authSvc)
 	attendanceHandler := transport.NewAttendanceHandler(attendanceSvc, photoStore)
+	profileHandler := transport.NewProfileHandler(profileSvc, photoStore, authSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -76,6 +78,7 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(transport.RequireAuth(authSvc))
 			attendanceHandler.RegisterRoutes(r)
+			profileHandler.RegisterRoutes(r)
 		})
 	})
 
