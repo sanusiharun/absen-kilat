@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "Absen Kilat",
+    "slug": "absen-kilat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "absenkilat",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sanusi.absenkilat",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Absen Kilat membutuhkan kamera untuk foto absen",
+        "NSLocationWhenInUseUsageDescription": "Absen Kilat membutuhkan lokasi untuk bukti absen"
+      }
+    },
+    "android": {
+      "package": "com.sanusi.absenkilat",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-status-bar",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Izinkan Absen Kilat mengakses kamera untuk foto absen"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Izinkan Absen Kilat mengakses lokasi untuk bukti absen"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
