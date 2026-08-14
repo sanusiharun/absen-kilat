@@ -16,6 +16,8 @@ import (
 
 	"github.com/sanusi/absen-kilat/backend/internal/config"
 	"github.com/sanusi/absen-kilat/backend/internal/db"
+	"github.com/sanusi/absen-kilat/backend/internal/repo"
+	"github.com/sanusi/absen-kilat/backend/internal/service"
 	"github.com/sanusi/absen-kilat/backend/internal/transport"
 	"github.com/sanusi/absen-kilat/backend/pkg/httpx"
 )
@@ -38,6 +40,12 @@ func main() {
 	defer pool.Close()
 	logger.Info("database ready", "path", cfg.DBPath)
 
+	// Wire repositories and services.
+	userRepo := repo.NewUserRepository(pool)
+	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
+
+	authHandler := transport.NewAuthHandler(authSvc)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
@@ -53,6 +61,10 @@ func main() {
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteOK(w, map[string]string{"status": "ok"})
+	})
+
+	r.Route("/api/v1", func(r chi.Router) {
+		authHandler.RegisterRoutes(r)
 	})
 
 	addr := ":" + cfg.Port
