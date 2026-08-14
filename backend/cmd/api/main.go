@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/sanusi/absen-kilat/backend/internal/config"
+	"github.com/sanusi/absen-kilat/backend/internal/db"
 	"github.com/sanusi/absen-kilat/backend/internal/transport"
 	"github.com/sanusi/absen-kilat/backend/pkg/httpx"
 )
@@ -24,6 +25,18 @@ func main() {
 
 	logger := newLogger(cfg.Env)
 	slog.SetDefault(logger)
+
+	// Open database (applies migrations on first run).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := db.Open(ctx, cfg.DBPath)
+	if err != nil {
+		logger.Error("database init failed", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+	logger.Info("database ready", "path", cfg.DBPath)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -50,9 +63,6 @@ func main() {
 	}
 
 	// Graceful shutdown on SIGINT/SIGTERM.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	go func() {
 		logger.Info("server listening", "addr", addr, "env", cfg.Env)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
