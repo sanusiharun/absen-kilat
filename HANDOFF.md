@@ -35,11 +35,13 @@
 Lihat `obsidian-vault/02-Projects/absen-kilat/plan/BUILD-PLAN.md` (bagian API Contract) — ini kontrak yang dipegang bersama FE & BE. Jangan ubah tanpa update kedua sisi.
 
 ## Konvensi Backend (WAJIB)
+- **Baca `obsidian-vault/02-Projects/absen-kilat/docs/BACKEND-CONVENTIONS.md`** — ini sumber aturan backend (salinan dari golang-banking-platform).
 - Layered: Transport → Service → Repo → DAO
 - Router `chi` + stdlib, response pakai `pkg/httpx`
 - Logging `slog` (bukan fmt.Println)
 - Error wrapping `fmt.Errorf("pkg.Func: %w", err)` + domain error di `pkg/errors`
 - Modul: `github.com/sanusi/absen-kilat/backend`
+- Git identity: `sanusiharun <sanusiharun@gmail.com>`
 
 ## Catatan Sesi
 _<diisi tiap sesi>_
