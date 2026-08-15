@@ -1,10 +1,11 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { authApi } from '@/src/api/endpoints';
 import { AuthScreen, Button, ErrorText, Field } from '@/src/components/AuthForm';
-import { colors } from '@/src/theme';
+import { colors, spacing } from '@/src/theme';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -32,22 +33,41 @@ export default function ForgotPasswordScreen() {
 
   if (done) {
     return (
-      <AuthScreen title="Cek Email" subtitle="Jika email terdaftar, link reset password sudah dikirim. Hubungi admin untuk token reset di versi pilot.">
+      <AuthScreen
+        title="Cek Email"
+        subtitle="Jika email terdaftar, link reset password sudah dikirim. Hubungi admin untuk token reset di versi pilot."
+        icon={<Ionicons name="checkmark-circle" size={32} color={colors.success} />}
+      >
         <Button title="Kembali ke Login" onPress={() => router.replace('/(auth)/login')} />
       </AuthScreen>
     );
   }
 
   return (
-    <AuthScreen title="Lupa Password" subtitle="Masukkan email untuk reset password">
-      <Field label="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoComplete="email" />
+    <AuthScreen
+      title="Lupa Kata Sandi"
+      subtitle="Masukkan email kamu, kami kirim tautan reset"
+      icon={<Ionicons name="mail-outline" size={28} color={colors.primary} />}
+    >
+      <Field
+        label="Email"
+        value={email}
+        onChangeText={setEmail}
+        keyboardType="email-address"
+        autoComplete="email"
+        placeholder="nama@perusahaan.com"
+      />
       <ErrorText message={error} />
-      <Button title="Kirim Reset" onPress={onSubmit} loading={loading} />
-      <View style={{ alignItems: 'center', marginTop: 16 }}>
-        <Link href="/(auth)/login" style={{ color: colors.primary, fontWeight: '600' }}>
-          Kembali ke Login
+      <Button title="Kirim Tautan Reset" onPress={onSubmit} loading={loading} />
+      <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
+        <Link href="/(auth)/login" style={styles.backLink}>
+          Kembali ke login
         </Link>
       </View>
     </AuthScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  backLink: { color: colors.primary, fontWeight: '600', fontSize: 14 },
+});

@@ -1,10 +1,11 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { authApi } from '@/src/api/endpoints';
 import { AuthScreen, Button, ErrorText, Field } from '@/src/components/AuthForm';
-import { colors } from '@/src/theme';
+import { colors, spacing } from '@/src/theme';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
@@ -35,16 +36,31 @@ export default function ResetPasswordScreen() {
   }
 
   return (
-    <AuthScreen title="Reset Password" subtitle="Masukkan token reset dan password baru">
-      <Field label="Token" value={token} onChangeText={setToken} autoCapitalize="none" />
-      <Field label="Password Baru" value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password" />
+    <AuthScreen
+      title="Reset Password"
+      subtitle="Masukkan token reset dan password baru"
+      icon={<Ionicons name="key-outline" size={28} color={colors.primary} />}
+    >
+      <Field label="Token" value={token} onChangeText={setToken} autoCapitalize="none" placeholder="Token dari email" />
+      <Field
+        label="Password Baru"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+        autoComplete="new-password"
+        placeholder="Minimal 8 karakter"
+      />
       <ErrorText message={error} />
       <Button title="Reset Password" onPress={onSubmit} loading={loading} />
-      <View style={{ alignItems: 'center', marginTop: 16 }}>
-        <Link href="/(auth)/login" style={{ color: colors.primary, fontWeight: '600' }}>
-          Kembali ke Login
+      <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
+        <Link href="/(auth)/login" style={styles.backLink}>
+          Kembali ke login
         </Link>
       </View>
     </AuthScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  backLink: { color: colors.primary, fontWeight: '600', fontSize: 14 },
+});

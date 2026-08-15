@@ -1,10 +1,17 @@
 // Shared theme constants for Absen Kilat.
 export const colors = {
-  primary: '#2563EB',
-  primaryDark: '#1D4ED8',
+  // Primary: indigo
+  primary: '#6366F1',
+  primaryDark: '#4F46E5',
+  primarySoft: '#EEF2FF',
+  // Semantic
   success: '#16A34A',
-  warning: '#D97706',
+  successSoft: '#DCFCE7',
+  warning: '#F59E0B',
+  warningSoft: '#FEF3C7',
   danger: '#DC2626',
+  dangerSoft: '#FEE2E2',
+  // Surfaces
   bg: '#F8FAFC',
   card: '#FFFFFF',
   text: '#0F172A',

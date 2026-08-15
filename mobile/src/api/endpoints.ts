@@ -23,6 +23,11 @@ export interface Attendance {
   photo_url: string;
   latitude?: number;
   longitude?: number;
+  address?: string;
+  device?: string;
+  ip_address?: string;
+  distance_m?: number;
+  notes?: string;
   occurred_at: string;
 }
 
@@ -30,6 +35,14 @@ export interface TodayState {
   checked_in: boolean;
   checked_out: boolean;
   records: Attendance[];
+}
+
+export interface Notification {
+  id: string;
+  title: string;
+  body: string;
+  is_read: boolean;
+  created_at: string;
 }
 
 export const authApi = {
@@ -59,7 +72,20 @@ export const profileApi = {
 export const attendanceApi = {
   checkIn: (formData: FormData) => api.upload<Attendance>('/attendance', formData),
   checkOut: (formData: FormData) => api.upload<Attendance>('/attendance', formData),
+  submit: (formData: FormData) => api.upload<Attendance>('/attendance', formData),
   today: () => api.get<TodayState>('/attendance/today'),
   list: (date: string) => api.get<{ records: Attendance[]; date: string }>(`/attendance?date=${date}`),
   detail: (id: string) => api.get<Attendance>(`/attendance/${id}`),
+};
+
+export const geocodeApi = {
+  reverse: (lat: number, lng: number) =>
+    api.get<{ address: string; short_address: string }>(`/geocode?lat=${lat}&lng=${lng}`),
+};
+
+export const notificationApi = {
+  list: () => api.get<{ notifications: Notification[] }>('/notifications'),
+  unreadCount: () => api.get<{ unread: number }>('/notifications/unread-count'),
+  markRead: (id: string) => api.post<{ ok: boolean }>(`/notifications/${id}/read`),
+  markAllRead: () => api.post<{ ok: boolean }>('/notifications/read-all'),
 };
