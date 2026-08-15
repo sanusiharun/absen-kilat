@@ -61,7 +61,7 @@ Enforcement: middleware `RequireRole("super_admin","hr")` di backend; sidebar ad
 [Opsional: HR konfirmasi] ──► final: approved / rejected
 ```
 
-- **Auto-approve (opsional, konfigurasi):** absen dari app dalam radius & foto ada → langsung `approved`. Di luar radius / QR / manual → `pending`.
+- **Auto-approve (KEPUTUSAN 2026-08-15):** absen dari app dalam radius & foto ada → langsung `approved`. Di luar radius / QR / manual / tanpa foto (jika wajib) → `pending`.
 - **Escalation:** pending > 24 jam → notifikasi ke HR.
 - **Audit trail:** tabel `approval_log` (attendance_id, actor_id, action, reason, created_at).
 - **Overrides** (issue #10) selalu tercatat + butuh alasan.
@@ -106,7 +106,7 @@ CREATE TABLE approval_log (
 
 ## 9. Open Question (perlu keputusan user)
 
-1. Auto-approve untuk absen normal (dalam radius + foto)? (saran: ya)
+1. ~~Auto-approve untuk absen normal (dalam radius + foto)?~~ → **DIPUTUSKAN: ya, auto-approve** (2026-08-15).
 2. Butuh role `owner` terpisah dari `super_admin`? (saran: cukup super_admin)
 3. Approval 2 tingkat (supervisor → HR) default atau opsional?
 4. Employee code: wajib utk semua karyawan? (saran: ya, utk QR & identifikasi cepat)
