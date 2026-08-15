@@ -20,6 +20,7 @@ import { Button, ErrorText } from '@/src/components/AuthForm';
 import { Avatar } from '@/src/components/Avatar';
 import { useProfile } from '@/src/hooks/useProfile';
 import { colors, spacing } from '@/src/theme';
+import { compressImage } from '@/src/utils/image';
 
 type Expanded = 'info' | 'password' | null;
 
@@ -69,9 +70,11 @@ export default function ProfileScreen() {
       quality: 0.7,
     });
     if (res.canceled || !res.assets[0]) return;
+    // Kompres foto profil sebelum upload (hemat kuota).
+    const uri = await compressImage(res.assets[0].uri);
     const form = new FormData();
     form.append('avatar', {
-      uri: res.assets[0].uri,
+      uri,
       name: `avatar-${Date.now()}.jpg`,
       type: 'image/jpeg',
     } as unknown as Blob);

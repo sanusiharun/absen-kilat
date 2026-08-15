@@ -20,6 +20,7 @@ import { api, getToken, clearToken } from "@/lib/api";
 import AdminShell from "@/components/admin-shell";
 import { Icon, type IconName } from "@/components/icons";
 import { Avatar, Empty, LegendRow } from "@/components/ui";
+import { Select } from "@/components/fields";
 
 type Stats = {
   total_users: number;
@@ -65,7 +66,6 @@ export default function DashboardPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [error, setError] = useState("");
   const [days, setDays] = useState(7);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
 
   const load = useCallback(async () => {
     if (!getToken()) {
@@ -115,46 +115,31 @@ export default function DashboardPage() {
       actions={
         <>
           {/* Date filter */}
-          <div className="relative">
-            <select
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
-              className="appearance-none rounded-full border border-slate-200 bg-white py-1.5 pl-3 pr-8 text-xs font-medium text-slate-700 focus:border-indigo-400 focus:outline-none"
-            >
-              <option value={7}>7 Hari Terakhir</option>
-              <option value={14}>14 Hari Terakhir</option>
-              <option value={30}>30 Hari Terakhir</option>
-            </select>
-            <Icon
-              name="chevron-down"
-              className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-            />
-          </div>
+          <Select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            pill
+            options={[
+              { value: "7", label: "7 Hari Terakhir" },
+              { value: "14", label: "14 Hari Terakhir" },
+              { value: "30", label: "30 Hari Terakhir" },
+            ]}
+          />
 
           {/* Notifications */}
           <button
             type="button"
             title="Notifikasi"
-            className="relative flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50"
+            className="relative flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
           >
             <Icon name="bell" className="h-[18px] w-[18px]" />
             <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-pink-500" />
-          </button>
-
-          {/* Theme toggle (visual) */}
-          <button
-            type="button"
-            title="Ganti tema"
-            onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-50"
-          >
-            <Icon name={theme === "light" ? "sun" : "moon"} className="h-[18px] w-[18px]" />
           </button>
         </>
       }
     >
       {error && (
-        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-400">
           {error}
         </div>
       )}
@@ -194,9 +179,9 @@ export default function DashboardPage() {
       {/* Charts row */}
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Line chart */}
-        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 lg:col-span-1">
-          <h2 className="mb-1 font-semibold text-slate-900">Grafik Presensi</h2>
-          <p className="mb-4 text-xs text-slate-500">{days} hari terakhir</p>
+        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800 lg:col-span-1">
+          <h2 className="mb-1 font-semibold text-slate-900 dark:text-slate-100">Grafik Presensi</h2>
+          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">{days} hari terakhir</p>
           {trends.length === 0 ? (
             <Empty height={220} />
           ) : (
@@ -241,8 +226,8 @@ export default function DashboardPage() {
         </div>
 
         {/* Donut */}
-        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
-          <h2 className="mb-4 font-semibold text-slate-900">Presensi per Status</h2>
+        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
+          <h2 className="mb-4 font-semibold text-slate-900 dark:text-slate-100">Presensi per Status</h2>
           {donutTotal === 0 ? (
             <Empty height={220} />
           ) : (
@@ -269,8 +254,8 @@ export default function DashboardPage() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <div className="text-2xl font-bold text-slate-900">{donutTotal}</div>
-                  <div className="text-xs text-slate-500">Total Presensi</div>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{donutTotal}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Total Presensi</div>
                 </div>
               </div>
               <LegendRow
@@ -281,8 +266,8 @@ export default function DashboardPage() {
         </div>
 
         {/* Bar chart */}
-        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
-          <h2 className="mb-4 font-semibold text-slate-900">Absensi per Lokasi (Top 5)</h2>
+        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
+          <h2 className="mb-4 font-semibold text-slate-900 dark:text-slate-100">Absensi per Lokasi (Top 5)</h2>
           {topLocs.length === 0 ? (
             <Empty height={220} />
           ) : (
@@ -312,20 +297,20 @@ export default function DashboardPage() {
       </div>
 
       {/* Users table */}
-      <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-100">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+      <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 dark:border-slate-800">
           <div>
-            <h2 className="font-semibold text-slate-900">Manajemen Pengguna</h2>
-            <p className="text-xs text-slate-500">Daftar akun terdaftar di sistem</p>
+            <h2 className="font-semibold text-slate-900 dark:text-slate-100">Manajemen Pengguna</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Daftar akun terdaftar di sistem</p>
           </div>
-          <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+          <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400">
             {users.length} pengguna
           </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
                 <th className="px-6 py-3">Nama</th>
                 <th className="px-6 py-3">Email</th>
                 <th className="px-6 py-3">Role</th>
@@ -334,20 +319,20 @@ export default function DashboardPage() {
             </thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.id} className="border-b border-slate-50 transition-colors hover:bg-slate-50/60">
+                <tr key={u.id} className="border-b border-slate-50 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/40">
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-3">
                       <Avatar name={u.name} src={u.avatar_url} size="h-8 w-8 text-xs" />
-                      <span className="font-medium text-slate-900">{u.name || "—"}</span>
+                      <span className="font-medium text-slate-900 dark:text-slate-100">{u.name || "—"}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-3 text-slate-600">{u.email}</td>
+                  <td className="px-6 py-3 text-slate-600 dark:text-slate-300">{u.email}</td>
                   <td className="px-6 py-3">
                     <span
                       className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         u.role === "admin"
-                          ? "bg-indigo-100 text-indigo-700"
-                          : "bg-slate-100 text-slate-600"
+                          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
                       }`}
                     >
                       {u.role === "admin" ? "Admin" : "Karyawan"}
@@ -356,7 +341,7 @@ export default function DashboardPage() {
                   <td className="px-6 py-3">
                     <span
                       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        u.is_active ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"
+                        u.is_active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400" : "bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400"
                       }`}
                     >
                       <span className={`h-1.5 w-1.5 rounded-full ${u.is_active ? "bg-emerald-500" : "bg-red-500"}`} />
@@ -367,7 +352,7 @@ export default function DashboardPage() {
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-6 py-10 text-center text-slate-400">
+                  <td colSpan={4} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
                     Belum ada data pengguna
                   </td>
                 </tr>
@@ -396,17 +381,17 @@ function StatCard({
   tone: Tone;
 }) {
   return (
-    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
       <div className="flex items-center justify-between">
         <div className="min-w-0">
-          <div className="text-3xl font-bold leading-none text-slate-900">{value ?? "—"}</div>
-          <div className="mt-2 text-sm font-medium text-slate-600">{label}</div>
+          <div className="text-3xl font-bold leading-none text-slate-900 dark:text-slate-100">{value ?? "—"}</div>
+          <div className="mt-2 text-sm font-medium text-slate-600 dark:text-slate-300">{label}</div>
         </div>
         <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${TONE_ICON[tone]}`}>
           <Icon name={icon} className="h-6 w-6" />
         </div>
       </div>
-      <div className="mt-3 text-xs text-slate-400">{sub}</div>
+      <div className="mt-3 text-xs text-slate-400 dark:text-slate-500">{sub}</div>
     </div>
   );
 }

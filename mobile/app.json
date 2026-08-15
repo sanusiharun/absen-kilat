@@ -48,7 +48,8 @@
         {
           "locationWhenInUsePermission": "Izinkan Absen Kilat mengakses lokasi untuk bukti absen"
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true

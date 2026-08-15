@@ -24,6 +24,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { attendanceApi, geocodeApi } from '@/src/api/endpoints';
 import { Button } from '@/src/components/AuthForm';
 import { colors, spacing } from '@/src/theme';
+import { compressImage } from '@/src/utils/image';
 
 interface AbsenFlowProps {
   type: 'check_in' | 'check_out';
@@ -97,7 +98,8 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
       if (photo) {
-        setPhotoUri(photo.uri);
+        // Kompres foto sebelum ditampilkan & diupload (hemat kuota).
+        setPhotoUri(await compressImage(photo.uri));
         setStep('confirm');
       }
     } catch {
@@ -111,7 +113,8 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
       quality: 0.7,
     });
     if (!res.canceled && res.assets[0]) {
-      setPhotoUri(res.assets[0].uri);
+      // Kompres foto sebelum diupload.
+      setPhotoUri(await compressImage(res.assets[0].uri));
       setStep('confirm');
     }
   }, []);

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { attendanceApi, Attendance } from '@/src/api/endpoints';
+import { mediaURL } from '@/src/api/config';
 import { colors, spacing } from '@/src/theme';
 
 export default function DetailScreen() {
@@ -91,7 +92,7 @@ export default function DetailScreen() {
 
       {/* Foto selfie */}
       {att.photo_url ? (
-        <Image source={{ uri: att.photo_url }} style={styles.photo} />
+        <Image source={{ uri: mediaURL(att.photo_url) }} style={styles.photo} />
       ) : (
         <View style={[styles.photo, styles.noPhoto]}>
           <Text style={styles.muted}>Tidak ada foto</Text>

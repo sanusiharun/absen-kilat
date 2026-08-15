@@ -101,6 +101,11 @@ func main() {
 		httpx.WriteOK(w, map[string]string{"status": "ok"})
 	})
 
+	// Serve uploaded photos (avatars & attendance photos) as static files.
+	// Files are stored under cfg.UploadDir as "<year>/<month>/<uuid>.<ext>"
+	// and are exposed publicly at /uploads/<path>.
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir(cfg.UploadDir))))
+
 	r.Route("/api/v1", func(r chi.Router) {
 		authHandler.RegisterRoutes(r)
 		r.Group(func(r chi.Router) {

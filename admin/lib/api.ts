@@ -3,7 +3,19 @@
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8090/api/v1";
 
+// Root URL (tanpa suffix /api/v1), dipakai untuk membangun URL file statis.
+export const API_ROOT = API_BASE.replace(/\/api\/v1\/?$/, "");
+
 export const TOKEN_KEY = "absenkilat_admin_token";
+
+// Ubah path relatif foto (mis. "uploads/xxx.jpg" atau "2026/08/xxx.jpg")
+// menjadi URL absolut. Path absolut (http...) dikembalikan apa adanya.
+export function mediaURL(path?: string | null): string {
+  if (!path) return "";
+  if (/^https?:\/\//.test(path)) return path;
+  const clean = path.replace(/^\//, "");
+  return `${API_ROOT}/${clean.startsWith("uploads/") ? clean : `uploads/${clean}`}`;
+}
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;

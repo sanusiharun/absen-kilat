@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { api, clearToken, getToken } from "@/lib/api";
 import AdminShell from "@/components/admin-shell";
 import { Icon } from "@/components/icons";
-import { Avatar, Card, CardHeader, ErrorBanner, Pill, Spinner, inputCls, selectCls } from "@/components/ui";
+import { Avatar, Card, CardHeader, ErrorBanner, Pill, Spinner, inputCls } from "@/components/ui";
+import { DateInput, Select } from "@/components/fields";
 import { formatDateTime } from "@/lib/format";
 
 type AdminAttendance = {
@@ -91,38 +92,48 @@ export default function AbsensiPage() {
         />
 
         {/* Filters */}
-        <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 px-6 py-4">
+        <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 px-6 py-4 dark:border-slate-800">
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               Dari
             </label>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={selectCls} />
+            <DateInput value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" />
           </div>
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               Sampai
             </label>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={selectCls} />
+            <DateInput value={to} onChange={(e) => setTo(e.target.value)} className="w-40" />
           </div>
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               Status
             </label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
-              <option value="">Semua Status</option>
-              <option value="on_time">Tepat Waktu</option>
-              <option value="late">Terlambat</option>
-            </select>
+            <Select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-40"
+              options={[
+                { value: "", label: "Semua Status" },
+                { value: "on_time", label: "Tepat Waktu" },
+                { value: "late", label: "Terlambat" },
+              ]}
+            />
           </div>
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               Tipe
             </label>
-            <select value={type} onChange={(e) => setType(e.target.value)} className={selectCls}>
-              <option value="">Semua Tipe</option>
-              <option value="check_in">Masuk</option>
-              <option value="check_out">Keluar</option>
-            </select>
+            <Select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-40"
+              options={[
+                { value: "", label: "Semua Tipe" },
+                { value: "check_in", label: "Masuk" },
+                { value: "check_out", label: "Keluar" },
+              ]}
+            />
           </div>
           <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
             <Icon
@@ -145,7 +156,7 @@ export default function AbsensiPage() {
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
                   <th className="px-6 py-3">Pengguna</th>
                   <th className="px-6 py-3">Tipe</th>
                   <th className="px-6 py-3">Status</th>
@@ -157,13 +168,13 @@ export default function AbsensiPage() {
               </thead>
               <tbody>
                 {rows.map((a) => (
-                  <tr key={a.id} className="border-b border-slate-50 transition-colors hover:bg-slate-50/60">
+                  <tr key={a.id} className="border-b border-slate-50 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/40">
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar name={a.user_name} size="h-8 w-8 text-xs" />
                         <div className="min-w-0">
-                          <div className="truncate font-medium text-slate-900">{a.user_name || "—"}</div>
-                          <div className="truncate text-xs text-slate-500">{a.user_email}</div>
+                          <div className="truncate font-medium text-slate-900 dark:text-slate-100">{a.user_name || "—"}</div>
+                          <div className="truncate text-xs text-slate-500 dark:text-slate-400">{a.user_email}</div>
                         </div>
                       </div>
                     </td>
@@ -171,8 +182,8 @@ export default function AbsensiPage() {
                       <Pill
                         className={
                           a.type === "check_in"
-                            ? "bg-blue-100 text-blue-700"
-                            : "bg-violet-100 text-violet-700"
+                            ? "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400"
+                            : "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400"
                         }
                       >
                         {a.type === "check_in" ? "Masuk" : "Keluar"}
@@ -182,26 +193,26 @@ export default function AbsensiPage() {
                       <Pill
                         className={
                           a.status === "on_time"
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-orange-100 text-orange-700"
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+                            : "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400"
                         }
                       >
                         {a.status === "on_time" ? "Tepat Waktu" : "Terlambat"}
                       </Pill>
                     </td>
-                    <td className="px-6 py-3 whitespace-nowrap text-slate-600">
+                    <td className="px-6 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300">
                       {formatDateTime(a.occurred_at)}
                     </td>
-                    <td className="max-w-[200px] truncate px-6 py-3 text-slate-600" title={a.address}>
+                    <td className="max-w-[200px] truncate px-6 py-3 text-slate-600 dark:text-slate-300" title={a.address}>
                       {a.address || "—"}
                     </td>
-                    <td className="px-6 py-3 text-slate-600">{a.device || "—"}</td>
-                    <td className="px-6 py-3 font-mono text-xs text-slate-500">{a.ip_address || "—"}</td>
+                    <td className="px-6 py-3 text-slate-600 dark:text-slate-300">{a.device || "—"}</td>
+                    <td className="px-6 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{a.ip_address || "—"}</td>
                   </tr>
                 ))}
                 {rows.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-10 text-center text-slate-400">
+                    <td colSpan={7} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
                       Belum ada data absensi
                     </td>
                   </tr>

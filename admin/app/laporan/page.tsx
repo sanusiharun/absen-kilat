@@ -13,8 +13,8 @@ import {
 } from "recharts";
 import { api, clearToken, getToken } from "@/lib/api";
 import AdminShell from "@/components/admin-shell";
-import { Icon } from "@/components/icons";
 import { Card, CardHeader, Empty, ErrorBanner, LegendRow, Pill, Spinner } from "@/components/ui";
+import { Select } from "@/components/fields";
 import { formatDate } from "@/lib/format";
 
 type Report = { date: string; present: number; late: number; absent: number; total: number };
@@ -66,29 +66,24 @@ export default function LaporanPage() {
       title="Laporan"
       subtitle="Ringkasan harian presensi karyawan"
       actions={
-        <div className="relative">
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="appearance-none rounded-full border border-slate-200 bg-white py-1.5 pl-3 pr-8 text-xs font-medium text-slate-700 focus:border-indigo-400 focus:outline-none"
-          >
-            <option value={7}>7 Hari Terakhir</option>
-            <option value={14}>14 Hari Terakhir</option>
-            <option value={30}>30 Hari Terakhir</option>
-          </select>
-          <Icon
-            name="chevron-down"
-            className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-          />
-        </div>
+        <Select
+          value={days}
+          onChange={(e) => setDays(Number(e.target.value))}
+          pill
+          options={[
+            { value: "7", label: "7 Hari Terakhir" },
+            { value: "14", label: "14 Hari Terakhir" },
+            { value: "30", label: "30 Hari Terakhir" },
+          ]}
+        />
       }
     >
       <ErrorBanner message={error} />
 
       {/* Trend chart */}
       <Card className="mb-6 p-5">
-        <h2 className="font-semibold text-slate-900">Grafik Tren Presensi</h2>
-        <p className="mb-4 text-xs text-slate-500">{days} hari terakhir</p>
+        <h2 className="font-semibold text-slate-900 dark:text-slate-100">Grafik Tren Presensi</h2>
+        <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">{days} hari terakhir</p>
         {loading ? (
           <Spinner />
         ) : trends.length === 0 ? (
@@ -139,7 +134,7 @@ export default function LaporanPage() {
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
                   <th className="px-6 py-3">Tanggal</th>
                   <th className="px-6 py-3 text-center">Total</th>
                   <th className="px-6 py-3 text-center">Hadir</th>
@@ -152,27 +147,27 @@ export default function LaporanPage() {
                 {reports.map((r) => {
                   const pct = r.total > 0 ? Math.round((r.present / r.total) * 100) : 0;
                   return (
-                    <tr key={r.date} className="border-b border-slate-50 transition-colors hover:bg-slate-50/60">
-                      <td className="px-6 py-3 font-medium text-slate-900">{formatDate(r.date)}</td>
-                      <td className="px-6 py-3 text-center text-slate-600">{r.total}</td>
+                    <tr key={r.date} className="border-b border-slate-50 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/40">
+                      <td className="px-6 py-3 font-medium text-slate-900 dark:text-slate-100">{formatDate(r.date)}</td>
+                      <td className="px-6 py-3 text-center text-slate-600 dark:text-slate-300">{r.total}</td>
                       <td className="px-6 py-3 text-center">
-                        <Pill className="bg-blue-100 text-blue-700">{r.present}</Pill>
+                        <Pill className="bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400">{r.present}</Pill>
                       </td>
                       <td className="px-6 py-3 text-center">
-                        <Pill className="bg-orange-100 text-orange-700">{r.late}</Pill>
+                        <Pill className="bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400">{r.late}</Pill>
                       </td>
                       <td className="px-6 py-3 text-center">
-                        <Pill className="bg-pink-100 text-pink-700">{r.absent}</Pill>
+                        <Pill className="bg-pink-100 text-pink-700 dark:bg-pink-500/15 dark:text-pink-400">{r.absent}</Pill>
                       </td>
                       <td className="px-6 py-3">
                         <div className="flex items-center justify-end gap-2">
-                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                             <div
                               className="h-full rounded-full bg-indigo-500"
                               style={{ width: `${pct}%` }}
                             />
                           </div>
-                          <span className="w-10 text-right text-xs font-semibold text-slate-600">{pct}%</span>
+                          <span className="w-10 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">{pct}%</span>
                         </div>
                       </td>
                     </tr>
@@ -180,7 +175,7 @@ export default function LaporanPage() {
                 })}
                 {reports.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={6} className="px-6 py-10 text-center text-slate-400">
+                    <td colSpan={6} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
                       Belum ada data laporan
                     </td>
                   </tr>

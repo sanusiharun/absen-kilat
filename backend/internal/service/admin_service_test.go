@@ -250,7 +250,7 @@ func TestAdminService_ListAttendances(t *testing.T) {
 	u1 := addUser(t, ur, "alice@test.dev", domain.RoleEmployee)
 	u2 := addUser(t, ur, "bob@test.dev", domain.RoleEmployee)
 
-	now := time.Now().UTC()
+	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC) // fixed noon: never near midnight
 	yesterday := now.AddDate(0, 0, -1)
 	atts := []*domain.Attendance{
 		{UserID: u1.ID, Type: domain.AttendanceCheckIn, Status: domain.StatusOnTime, Device: "Android", OccurredAt: now},
@@ -307,7 +307,7 @@ func TestAdminService_ListAttendances(t *testing.T) {
 	}
 
 	// Date range: only today's records (yesterday excluded).
-	today := time.Now().Format("2006-01-02")
+	today := now.In(time.Local).Format("2006-01-02")
 	list, total, err = svc.ListAttendances(ctx, AttendanceFilter{From: today, To: today})
 	if err != nil {
 		t.Fatalf("ListAttendances range: %v", err)

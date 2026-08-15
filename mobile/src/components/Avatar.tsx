@@ -1,5 +1,6 @@
 import { Image, StyleSheet, Text, View } from 'react-native';
 
+import { mediaURL } from '@/src/api/config';
 import { useProfile } from '@/src/hooks/useProfile';
 import { colors } from '@/src/theme';
 
@@ -10,13 +11,14 @@ interface AvatarProps {
 // Avatar menampilkan foto profil jika ada, fallback inisial nama.
 export function Avatar({ size = 40 }: AvatarProps) {
   const { profile } = useProfile();
-  const hasAvatar = !!profile?.avatar_url;
+  const avatarUri = mediaURL(profile?.avatar_url);
+  const hasAvatar = !!avatarUri;
 
   return (
     <View style={[styles.container, { width: size, height: size, borderRadius: size / 2 }]}>
       {hasAvatar ? (
         <Image
-          source={{ uri: profile.avatar_url }}
+          source={{ uri: avatarUri }}
           style={{ width: size, height: size, borderRadius: size / 2 }}
         />
       ) : (

@@ -94,15 +94,17 @@ export default function AkunAdminPage() {
               <div className="mb-6 flex items-center gap-4">
                 <Avatar name={me?.name || "Admin"} src={me?.avatar_url} size="h-16 w-16 text-xl" />
                 <div>
-                  <div className="text-lg font-bold text-slate-900">{me?.name || "—"}</div>
-                  <div className="text-sm text-slate-500">{me?.email || "—"}</div>
+                  <div className="text-lg font-bold text-slate-900 dark:text-slate-100">{me?.name || "—"}</div>
+                  <div className="text-sm text-slate-500 dark:text-slate-400">{me?.email || "—"}</div>
                   <div className="mt-1.5 flex items-center gap-2">
-                    <Pill className="bg-indigo-100 text-indigo-700">
+                    <Pill className="bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400">
                       {me?.role === "admin" ? "Admin" : me?.role || "—"}
                     </Pill>
                     <Pill
                       className={
-                        me?.is_active ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"
+                        me?.is_active
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+                          : "bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400"
                       }
                     >
                       {me?.is_active ? "Aktif" : "Nonaktif"}
@@ -112,15 +114,15 @@ export default function AkunAdminPage() {
               </div>
 
               <dl className="space-y-3 text-sm">
-                <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3">
-                  <dt className="text-slate-500">Email terverifikasi</dt>
-                  <dd className="font-medium text-slate-900">
+                <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 dark:bg-slate-800">
+                  <dt className="text-slate-500 dark:text-slate-400">Email terverifikasi</dt>
+                  <dd className="font-medium text-slate-900 dark:text-slate-100">
                     {me?.is_email_verified ? "Ya" : "Belum"}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3">
-                  <dt className="text-slate-500">Notifikasi</dt>
-                  <dd className="font-medium text-slate-900">
+                <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 dark:bg-slate-800">
+                  <dt className="text-slate-500 dark:text-slate-400">Notifikasi</dt>
+                  <dd className="font-medium text-slate-900 dark:text-slate-100">
                     {me?.notification_enabled ? "Aktif" : "Nonaktif"}
                   </dd>
                 </div>
@@ -129,7 +131,7 @@ export default function AkunAdminPage() {
               <button
                 type="button"
                 onClick={logout}
-                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50"
+                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-slate-900 dark:text-red-400 dark:hover:bg-red-950/40"
               >
                 <Icon name="logout" className="h-4 w-4" />
                 Keluar dari Dashboard
@@ -143,7 +145,7 @@ export default function AkunAdminPage() {
           <CardHeader title="Ganti Kata Sandi" subtitle="Perbarui kata sandi login admin" />
           <form onSubmit={changePassword} className="space-y-4 p-6">
             <div>
-              <label htmlFor="pw-current" className="mb-1.5 block text-sm font-medium text-slate-800">
+              <label htmlFor="pw-current" className="mb-1.5 block text-sm font-medium text-slate-800 dark:text-slate-200">
                 Kata Sandi Saat Ini
               </label>
               <div className="relative">
@@ -164,7 +166,7 @@ export default function AkunAdminPage() {
               </div>
             </div>
             <div>
-              <label htmlFor="pw-new" className="mb-1.5 block text-sm font-medium text-slate-800">
+              <label htmlFor="pw-new" className="mb-1.5 block text-sm font-medium text-slate-800 dark:text-slate-200">
                 Kata Sandi Baru
               </label>
               <div className="relative">
@@ -186,7 +188,7 @@ export default function AkunAdminPage() {
               </div>
             </div>
             <div>
-              <label htmlFor="pw-confirm" className="mb-1.5 block text-sm font-medium text-slate-800">
+              <label htmlFor="pw-confirm" className="mb-1.5 block text-sm font-medium text-slate-800 dark:text-slate-200">
                 Konfirmasi Kata Sandi Baru
               </label>
               <div className="relative">
@@ -208,12 +210,12 @@ export default function AkunAdminPage() {
             </div>
 
             {pwError && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-400">
                 {pwError}
               </div>
             )}
             {pwSuccess && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-400">
                 {pwSuccess}
               </div>
             )}

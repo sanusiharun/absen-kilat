@@ -52,8 +52,8 @@ export default function LokasiPage() {
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Bar chart */}
         <Card className="p-5 lg:col-span-2">
-          <h2 className="font-semibold text-slate-900">Absensi per Lokasi</h2>
-          <p className="mb-4 text-xs text-slate-500">Top 10 lokasi terpadat</p>
+          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Absensi per Lokasi</h2>
+          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">Top 10 lokasi terpadat</p>
           {loading ? (
             <Spinner />
           ) : locs.length === 0 ? (
@@ -86,18 +86,18 @@ export default function LokasiPage() {
 
         {/* Summary card */}
         <Card className="p-5">
-          <h2 className="font-semibold text-slate-900">Ringkasan</h2>
-          <p className="mb-4 text-xs text-slate-500">10 lokasi teratas</p>
+          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Ringkasan</h2>
+          <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">10 lokasi teratas</p>
           <div className="space-y-3">
-            <div className="rounded-xl bg-indigo-50 p-4">
-              <div className="text-3xl font-bold text-indigo-700">{locs.length}</div>
-              <div className="mt-1 text-xs font-medium text-indigo-500">Lokasi terdeteksi</div>
+            <div className="rounded-xl bg-indigo-50 p-4 dark:bg-indigo-500/10">
+              <div className="text-3xl font-bold text-indigo-700 dark:text-indigo-400">{locs.length}</div>
+              <div className="mt-1 text-xs font-medium text-indigo-500 dark:text-indigo-400">Lokasi terdeteksi</div>
             </div>
-            <div className="rounded-xl bg-slate-50 p-4">
-              <div className="text-3xl font-bold text-slate-900">{totalCount}</div>
-              <div className="mt-1 text-xs font-medium text-slate-500">Total catatan absensi</div>
+            <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800">
+              <div className="text-3xl font-bold text-slate-900 dark:text-slate-100">{totalCount}</div>
+              <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">Total catatan absensi</div>
             </div>
-            <p className="text-xs leading-relaxed text-slate-400">
+            <p className="text-xs leading-relaxed text-slate-400 dark:text-slate-500">
               Lokasi dihitung dari alamat yang terkirim saat karyawan melakukan absensi.
             </p>
           </div>
@@ -113,7 +113,7 @@ export default function LokasiPage() {
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
                   <th className="px-6 py-3">#</th>
                   <th className="px-6 py-3">Lokasi</th>
                   <th className="px-6 py-3 text-right">Jumlah Absensi</th>
@@ -124,21 +124,21 @@ export default function LokasiPage() {
                 {locs.map((l, i) => {
                   const pct = totalCount > 0 ? Math.round((l.count / totalCount) * 100) : 0;
                   return (
-                    <tr key={`${l.location}-${i}`} className="border-b border-slate-50 transition-colors hover:bg-slate-50/60">
-                      <td className="px-6 py-3 text-slate-400">{i + 1}</td>
-                      <td className="px-6 py-3 font-medium text-slate-900">{l.location}</td>
+                    <tr key={`${l.location}-${i}`} className="border-b border-slate-50 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/40">
+                      <td className="px-6 py-3 text-slate-400 dark:text-slate-500">{i + 1}</td>
+                      <td className="px-6 py-3 font-medium text-slate-900 dark:text-slate-100">{l.location}</td>
                       <td className="px-6 py-3 text-right">
-                        <Pill className="bg-indigo-100 text-indigo-700">{l.count}</Pill>
+                        <Pill className="bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400">{l.count}</Pill>
                       </td>
                       <td className="px-6 py-3">
                         <div className="flex items-center gap-2">
-                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                             <div
                               className="h-full rounded-full bg-indigo-500"
                               style={{ width: `${maxCount > 0 ? (l.count / maxCount) * 100 : 0}%` }}
                             />
                           </div>
-                          <span className="w-10 text-right text-xs font-semibold text-slate-600">{pct}%</span>
+                          <span className="w-10 text-right text-xs font-semibold text-slate-600 dark:text-slate-300">{pct}%</span>
                         </div>
                       </td>
                     </tr>
@@ -146,7 +146,7 @@ export default function LokasiPage() {
                 })}
                 {locs.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={4} className="px-6 py-10 text-center text-slate-400">
+                    <td colSpan={4} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
                       Belum ada data lokasi
                     </td>
                   </tr>
