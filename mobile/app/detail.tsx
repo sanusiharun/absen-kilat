@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { attendanceApi, Attendance } from '@/src/api/endpoints';
+import { ApprovalBadge } from '@/src/components/ApprovalBadge';
 import { mediaURL } from '@/src/api/config';
 import { colors, spacing } from '@/src/theme';
 
@@ -62,6 +63,9 @@ export default function DetailScreen() {
   const cardBg = late ? colors.dangerSoft : '#F0FDF4';
   const statusLabel = late ? 'Terlambat' : 'Tepat Waktu';
 
+  // Sumber absen: tampilkan kecil kalau lewat QR / input manual.
+  const sourceLabel = att.source === 'qr' ? 'QR' : att.source === 'manual' ? 'Manual' : null;
+
   const openMaps = () => {
     if (!att.latitude || !att.longitude) return;
     const url = `https://www.google.com/maps?q=${att.latitude},${att.longitude}`;
@@ -81,6 +85,7 @@ export default function DetailScreen() {
             />
           </View>
           <Text style={styles.typeText}>{isIn ? 'Absen Masuk' : 'Absen Keluar'}</Text>
+          <ApprovalBadge status={att.approval_status} />
           <View style={[styles.statusBadge, { backgroundColor: late ? colors.danger : colors.success }]}>
             <Text style={styles.statusBadgeText}>{statusLabel}</Text>
           </View>
@@ -88,6 +93,7 @@ export default function DetailScreen() {
         <Text style={styles.timeBig}>{timeBig}</Text>
         <Text style={styles.dateText}>{dateFull}</Text>
         {att.device ? <Text style={styles.deviceText}>📱 {att.device}</Text> : null}
+        {sourceLabel ? <Text style={styles.deviceText}>Via {sourceLabel}</Text> : null}
       </View>
 
       {/* Foto selfie */}
@@ -112,6 +118,7 @@ export default function DetailScreen() {
               </View>
             ) : null}
           </View>
+          {att.location_name ? <Text style={styles.locName}>📌 {att.location_name}</Text> : null}
           {att.address ? <Text style={styles.address}>{att.address}</Text> : null}
           <Text style={styles.coords}>
             {att.latitude.toFixed(6)}, {att.longitude.toFixed(6)}
@@ -179,6 +186,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
   distBadge: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: 999 },
   distBadgeText: { fontSize: 11, fontWeight: '700' },
+  locName: { fontSize: 14, fontWeight: '700', color: colors.text, marginTop: spacing.xs },
   address: { fontSize: 14, color: colors.text, lineHeight: 19, marginTop: spacing.xs },
   coords: { fontSize: 12, color: colors.textMuted },
   mapsBtn: {

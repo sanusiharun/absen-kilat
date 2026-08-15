@@ -16,24 +16,31 @@ import (
 
 // attendanceDAO maps an attendances table row to/from a domain.Attendance.
 type attendanceDAO struct {
-	ID         string
-	UserID     string
-	Type       string
-	Status     string
-	PhotoPath  string
-	Latitude   sql.NullFloat64
-	Longitude  sql.NullFloat64
-	Address    string
-	Notes      string
-	Device     string
-	IPAddress  string
-	DistanceM  sql.NullInt64
-	OccurredAt string
-	CreatedAt  string
+	ID              string
+	UserID          string
+	Type            string
+	Status          string
+	PhotoPath       string
+	Latitude        sql.NullFloat64
+	Longitude       sql.NullFloat64
+	Address         string
+	Notes           string
+	Device          string
+	IPAddress       string
+	DistanceM       sql.NullInt64
+	Source          string
+	ApprovalStatus  string
+	ApprovedBy      sql.NullString
+	ApprovedAt      sql.NullString
+	RejectionReason string
+	LocationID      sql.NullString
+	OccurredAt      string
+	CreatedAt       string
 }
 
 const attendanceCols = `id, user_id, type, status, photo_path, latitude, longitude,
-	address, notes, device, ip_address, distance_m, occurred_at, created_at`
+	address, notes, device, ip_address, distance_m, source, approval_status,
+	approved_by, approved_at, rejection_reason, location_id, occurred_at, created_at`
 
 // AttendanceRepository is the SQLite implementation of domain.AttendanceRepository.
 type AttendanceRepository struct {
@@ -52,15 +59,25 @@ func (r *AttendanceRepository) Create(ctx context.Context, a *domain.Attendance)
 	if a.CreatedAt.IsZero() {
 		a.CreatedAt = time.Now().UTC()
 	}
+	if a.Source == "" {
+		a.Source = domain.SourceApp
+	}
+	if a.ApprovalStatus == "" {
+		a.ApprovalStatus = domain.ApprovalPending
+	}
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO attendances (id, user_id, type, status, photo_path,
 			latitude, longitude, address, notes, device, ip_address, distance_m,
+			source, approval_status, approved_by, approved_at, rejection_reason, location_id,
 			occurred_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.UserID, string(a.Type), string(a.Status), a.PhotoPath,
 		nullFloat(a.Latitude), nullFloat(a.Longitude), a.Address, a.Notes,
 		a.Device, a.IPAddress, nullInt(a.DistanceM),
+		string(a.Source), string(a.ApprovalStatus),
+		nullString(a.ApprovedBy), nullTime(a.ApprovedAt), a.RejectionReason,
+		nullString(a.LocationID),
 		formatTime(a.OccurredAt), formatTime(a.CreatedAt),
 	)
 	if err != nil {
@@ -101,6 +118,75 @@ func (r *AttendanceRepository) FindByID(ctx context.Context, id string) (*domain
 	row := r.db.QueryRowContext(ctx,
 		`SELECT `+attendanceCols+` FROM attendances WHERE id = ?`, id)
 	return scanAttendance(row)
+}
+
+// UpdateAttendance persists the editable fields of an attendance record
+// (type, status, occurred_at, approval state, location). Used by admin
+// overrides; always write the whole record after mutating it.
+func (r *AttendanceRepository) UpdateAttendance(ctx context.Context, a *domain.Attendance) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE attendances SET type = ?, status = ?, occurred_at = ?,
+			approval_status = ?, approved_by = ?, approved_at = ?,
+			rejection_reason = ?, location_id = ?
+		WHERE id = ?`,
+		string(a.Type), string(a.Status), formatTime(a.OccurredAt),
+		string(a.ApprovalStatus), nullString(a.ApprovedBy), nullTime(a.ApprovedAt),
+		a.RejectionReason, nullString(a.LocationID), a.ID)
+	if err != nil {
+		return fmt.Errorf("repo.AttendanceRepository.UpdateAttendance: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repo.AttendanceRepository.UpdateAttendance: rows: %w", err)
+	}
+	if n == 0 {
+		return pkgerrors.NotFound("attendance", a.ID)
+	}
+	return nil
+}
+
+// InsertApprovalLog appends one entry to the approval audit trail.
+func (r *AttendanceRepository) InsertApprovalLog(ctx context.Context, l *domain.ApprovalLog) error {
+	if l.ID == "" {
+		l.ID = uuid.NewString()
+	}
+	if l.CreatedAt.IsZero() {
+		l.CreatedAt = time.Now().UTC()
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO approval_log (id, attendance_id, actor_id, action, reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		l.ID, l.AttendanceID, l.ActorID, l.Action, l.Reason, formatTime(l.CreatedAt))
+	if err != nil {
+		return fmt.Errorf("repo.AttendanceRepository.InsertApprovalLog: %w", err)
+	}
+	return nil
+}
+
+// ListApprovalLogs returns the audit trail for an attendance, oldest first.
+func (r *AttendanceRepository) ListApprovalLogs(ctx context.Context, attendanceID string) ([]domain.ApprovalLog, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, attendance_id, actor_id, action, reason, created_at
+		FROM approval_log
+		WHERE attendance_id = ?
+		ORDER BY created_at ASC`, attendanceID)
+	if err != nil {
+		return nil, fmt.Errorf("repo.AttendanceRepository.ListApprovalLogs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.ApprovalLog
+	for rows.Next() {
+		var l domain.ApprovalLog
+		var createdAt string
+		if err := rows.Scan(&l.ID, &l.AttendanceID, &l.ActorID, &l.Action,
+			&l.Reason, &createdAt); err != nil {
+			return nil, fmt.Errorf("repo.AttendanceRepository.ListApprovalLogs: scan: %w", err)
+		}
+		l.CreatedAt = parseTime(createdAt)
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // CheckInStatusCountsOnDate returns the number of distinct users who
@@ -159,34 +245,41 @@ func (r *AttendanceRepository) TopLocations(ctx context.Context, limit int) ([]d
 // AdminAttendanceRow is one attendances row joined with its user (name and
 // email), used by the admin attendance listing.
 type AdminAttendanceRow struct {
-	ID         string
-	UserID     string
-	UserName   string
-	UserEmail  string
-	Type       string
-	Status     string
-	PhotoPath  string
-	Address    string
-	Latitude   sql.NullFloat64
-	Longitude  sql.NullFloat64
-	Device     string
-	IPAddress  string
-	DistanceM  sql.NullInt64
-	OccurredAt string
+	ID              string
+	UserID          string
+	UserName        string
+	UserEmail       string
+	Type            string
+	Status          string
+	PhotoPath       string
+	Address         string
+	Latitude        sql.NullFloat64
+	Longitude       sql.NullFloat64
+	Device          string
+	IPAddress       string
+	DistanceM       sql.NullInt64
+	Source          string
+	ApprovalStatus  string
+	ApprovedBy      sql.NullString
+	ApprovedAt      sql.NullString
+	RejectionReason string
+	LocationID      sql.NullString
+	OccurredAt      string
 }
 
 // AdminAttendanceFilter bounds the admin attendance listing. From is an
 // inclusive start instant and To an exclusive end instant (UTC); zero times
-// mean unbounded. Status/Type/Search are optional equality/substring
+// mean unbounded. Status/Type/Approval/Search are optional equality/substring
 // filters. Limit is clamped to [1, 500] and Offset to >= 0 by the query.
 type AdminAttendanceFilter struct {
-	From   time.Time
-	To     time.Time
-	Status string
-	Type   string
-	Search string
-	Limit  int
-	Offset int
+	From           time.Time
+	To             time.Time
+	Status         string
+	Type           string
+	ApprovalStatus string
+	Search         string
+	Limit          int
+	Offset         int
 }
 
 // ListAdmin returns attendance rows joined with user name/email, newest
@@ -209,6 +302,10 @@ func (r *AttendanceRepository) ListAdmin(ctx context.Context, f AdminAttendanceF
 	if f.Type != "" {
 		conds = append(conds, "a.type = ?")
 		args = append(args, f.Type)
+	}
+	if f.ApprovalStatus != "" {
+		conds = append(conds, "a.approval_status = ?")
+		args = append(args, f.ApprovalStatus)
 	}
 	if f.Search != "" {
 		conds = append(conds, "(u.name LIKE ? COLLATE NOCASE OR u.email LIKE ? COLLATE NOCASE)")
@@ -239,7 +336,8 @@ func (r *AttendanceRepository) ListAdmin(ctx context.Context, f AdminAttendanceF
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT a.id, a.user_id, u.name, u.email, a.type, a.status, a.photo_path,
 			a.address, a.latitude, a.longitude, a.device, a.ip_address, a.distance_m,
-			a.occurred_at
+			a.source, a.approval_status, a.approved_by, a.approved_at,
+			a.rejection_reason, a.location_id, a.occurred_at
 		FROM attendances a
 		JOIN users u ON u.id = a.user_id`+where+`
 		ORDER BY a.occurred_at DESC
@@ -254,7 +352,8 @@ func (r *AttendanceRepository) ListAdmin(ctx context.Context, f AdminAttendanceF
 		var d AdminAttendanceRow
 		if err := rows.Scan(&d.ID, &d.UserID, &d.UserName, &d.UserEmail, &d.Type, &d.Status,
 			&d.PhotoPath, &d.Address, &d.Latitude, &d.Longitude, &d.Device, &d.IPAddress,
-			&d.DistanceM, &d.OccurredAt); err != nil {
+			&d.DistanceM, &d.Source, &d.ApprovalStatus, &d.ApprovedBy, &d.ApprovedAt,
+			&d.RejectionReason, &d.LocationID, &d.OccurredAt); err != nil {
 			return nil, 0, fmt.Errorf("repo.AttendanceRepository.ListAdmin: scan: %w", err)
 		}
 		out = append(out, d)
@@ -295,7 +394,8 @@ func scanAttendance(row interface{ Scan(...any) error }) (*domain.Attendance, er
 	var d attendanceDAO
 	err := row.Scan(&d.ID, &d.UserID, &d.Type, &d.Status, &d.PhotoPath,
 		&d.Latitude, &d.Longitude, &d.Address, &d.Notes, &d.Device, &d.IPAddress,
-		&d.DistanceM, &d.OccurredAt, &d.CreatedAt)
+		&d.DistanceM, &d.Source, &d.ApprovalStatus, &d.ApprovedBy, &d.ApprovedAt,
+		&d.RejectionReason, &d.LocationID, &d.OccurredAt, &d.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, pkgerrors.NotFound("attendance", "")
@@ -303,17 +403,20 @@ func scanAttendance(row interface{ Scan(...any) error }) (*domain.Attendance, er
 		return nil, fmt.Errorf("repo.scanAttendance: %w", err)
 	}
 	a := &domain.Attendance{
-		ID:         d.ID,
-		UserID:     d.UserID,
-		Type:       domain.AttendanceType(d.Type),
-		Status:     domain.AttendanceStatus(d.Status),
-		PhotoPath:  d.PhotoPath,
-		Address:    d.Address,
-		Notes:      d.Notes,
-		Device:     d.Device,
-		IPAddress:  d.IPAddress,
-		OccurredAt: parseTime(d.OccurredAt),
-		CreatedAt:  parseTime(d.CreatedAt),
+		ID:              d.ID,
+		UserID:          d.UserID,
+		Type:            domain.AttendanceType(d.Type),
+		Status:          domain.AttendanceStatus(d.Status),
+		PhotoPath:       d.PhotoPath,
+		Address:         d.Address,
+		Notes:           d.Notes,
+		Device:          d.Device,
+		IPAddress:       d.IPAddress,
+		Source:          domain.AttendanceSource(d.Source),
+		ApprovalStatus:  domain.ApprovalStatus(d.ApprovalStatus),
+		RejectionReason: d.RejectionReason,
+		OccurredAt:      parseTime(d.OccurredAt),
+		CreatedAt:       parseTime(d.CreatedAt),
 	}
 	if d.Latitude.Valid {
 		a.Latitude = &d.Latitude.Float64
@@ -324,6 +427,16 @@ func scanAttendance(row interface{ Scan(...any) error }) (*domain.Attendance, er
 	if d.DistanceM.Valid {
 		dm := int(d.DistanceM.Int64)
 		a.DistanceM = &dm
+	}
+	if d.ApprovedBy.Valid {
+		a.ApprovedBy = d.ApprovedBy.String
+	}
+	if d.ApprovedAt.Valid {
+		t := parseTime(d.ApprovedAt.String)
+		a.ApprovedAt = &t
+	}
+	if d.LocationID.Valid {
+		a.LocationID = d.LocationID.String
 	}
 	return a, nil
 }

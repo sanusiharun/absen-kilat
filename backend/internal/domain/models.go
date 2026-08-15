@@ -27,8 +27,17 @@ type User struct {
 	NotificationEnabled bool
 	Role                UserRole
 	IsActive            bool
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// Profile fields (migration 006): employee identity & hierarchy.
+	NIP          string // nomor induk pegawai
+	Phone        string
+	Department   string
+	Position     string
+	Address      string
+	JoinDate     string // YYYY-MM-DD
+	ManagerID    string // supervisor (users.id); "" when none
+	EmployeeCode string // unique identifier (QR/manual attendance)
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // AttendanceType distinguishes check-in from check-out records.
@@ -47,6 +56,24 @@ const (
 	StatusLate   AttendanceStatus = "late"
 )
 
+// AttendanceSource records how an attendance was captured.
+type AttendanceSource string
+
+const (
+	SourceApp    AttendanceSource = "app"    // from the mobile app
+	SourceQR     AttendanceSource = "qr"     // QR scan (public web form)
+	SourceManual AttendanceSource = "manual" // admin-created/override
+)
+
+// ApprovalStatus is the lifecycle state of an attendance record.
+type ApprovalStatus string
+
+const (
+	ApprovalPending  ApprovalStatus = "pending"
+	ApprovalApproved ApprovalStatus = "approved"
+	ApprovalRejected ApprovalStatus = "rejected"
+)
+
 // Attendance is a single check-in or check-out record.
 type Attendance struct {
 	ID         string
@@ -60,9 +87,47 @@ type Attendance struct {
 	Notes      string
 	Device     string
 	IPAddress  string
-	DistanceM  *int // meters from the office point (geofencing)
+	DistanceM  *int // meters from the nearest/selected location (geofencing)
 	OccurredAt time.Time
 	CreatedAt  time.Time
+	// Approval & source (migration 006).
+	Source          AttendanceSource
+	ApprovalStatus  ApprovalStatus
+	ApprovedBy      string
+	ApprovedAt      *time.Time
+	RejectionReason string
+	LocationID      string // locations.id the attendance is tied to ("" when none)
+}
+
+// Location is a geofence point (office/client/field) used for attendance.
+type Location struct {
+	ID        string
+	Name      string
+	Type      string // office | client | field
+	Lat       float64
+	Lng       float64
+	RadiusM   int // allowed radius in meters
+	Active    bool
+	CreatedAt time.Time
+}
+
+// ApprovalLog is one entry of the approval audit trail.
+type ApprovalLog struct {
+	ID           string
+	AttendanceID string
+	ActorID      string
+	Action       string // approve | reject | override
+	Reason       string
+	CreatedAt    time.Time
+}
+
+// Settings is the system configuration (work hours, mode, photo policy).
+type Settings struct {
+	WorkStart   string   // HH:MM
+	WorkEnd     string   // HH:MM
+	AbsenMode   string   // both | checkin_only
+	Workdays    []string // ["mon".."sun"]
+	PhotoPolicy string   // radius | always | off
 }
 
 // Notification is a user-facing message shown in the Notifications tab.
@@ -89,7 +154,8 @@ type DeviceStat struct {
 
 // UserRepository persists users.
 type UserRepository interface {
-	// Create inserts a new user. Returns ErrConflict on duplicate email.
+	// Create inserts a new user. Returns ErrConflict on duplicate email
+	// or duplicate employee_code.
 	Create(ctx context.Context, u *User) error
 	// FindByEmail returns the user with the given email, or ErrNotFound.
 	FindByEmail(ctx context.Context, email string) (*User, error)
@@ -108,6 +174,20 @@ type AttendanceRepository interface {
 	ListByUserDate(ctx context.Context, userID string, date time.Time, loc *time.Location) ([]Attendance, error)
 	// FindByID returns the attendance with the given id, or ErrNotFound.
 	FindByID(ctx context.Context, id string) (*Attendance, error)
+}
+
+// LocationRepository persists geofence locations.
+type LocationRepository interface {
+	// ListActive returns all active locations (for geofence checks).
+	ListActive(ctx context.Context) ([]Location, error)
+}
+
+// SettingsRepository persists key/value system settings.
+type SettingsRepository interface {
+	// All returns every settings key/value pair.
+	All(ctx context.Context) (map[string]string, error)
+	// Set upserts a single settings key.
+	Set(ctx context.Context, key, value string) error
 }
 
 // NotificationRepository persists user notifications.

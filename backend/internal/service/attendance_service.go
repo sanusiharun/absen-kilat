@@ -18,35 +18,63 @@ var ErrAlreadyCheckedIn = pkgerrors.Validation("type", "already checked in today
 // ErrAlreadyCheckedOut is returned when a check-out already exists today.
 var ErrAlreadyCheckedOut = pkgerrors.Validation("type", "already checked out today")
 
+// ErrPhotoRequired is returned when the photo policy demands a photo and
+// none was uploaded (outside the radius or at a field location).
+var ErrPhotoRequired = pkgerrors.Validation("photo", "foto wajib untuk lokasi ini")
+
+// validationLocationID is returned when the submitted location_id does not
+// match an active location.
+var validationLocationID = pkgerrors.Validation("location_id", "lokasi tidak ditemukan atau tidak aktif")
+
 // AttendanceInput carries the fields needed to record an attendance.
 type AttendanceInput struct {
-	UserID    string
-	Type      domain.AttendanceType
-	PhotoPath string
-	Latitude  *float64
-	Longitude *float64
-	Address   string
-	Notes     string
-	Device    string
-	IPAddress string
-	Now       time.Time // wall-clock time of the check (testable)
-	Location  *time.Location
+	UserID     string
+	Type       domain.AttendanceType
+	PhotoPath  string
+	Latitude   *float64
+	Longitude  *float64
+	Address    string
+	Notes      string
+	Device     string
+	IPAddress  string
+	LocationID string // "absen dimana": id of the selected location ("" = auto/nearest)
+	Now        time.Time
+	Location   *time.Location
+}
+
+// settingsProvider exposes the system settings needed by the attendance
+// photo policy (satisfied by *SettingsService).
+type settingsProvider interface {
+	Get(ctx context.Context) (*domain.Settings, error)
 }
 
 // AttendanceService implements attendance business logic.
 type AttendanceService struct {
 	repo       domain.AttendanceRepository
-	cutoffHour int         // local hour after which check-ins are "late"
-	office     OfficeConfig // geofence: office point + allowed radius
+	locations  domain.LocationRepository // may be nil → legacy office fallback
+	settings   settingsProvider          // may be nil → photo policy "radius"
+	cutoffHour int                       // local hour after which check-ins are "late"
+	office     OfficeConfig              // legacy geofence fallback
 }
 
-// NewAttendanceService creates an AttendanceService.
-func NewAttendanceService(repo domain.AttendanceRepository, cutoffHour int, office OfficeConfig) *AttendanceService {
-	return &AttendanceService{repo: repo, cutoffHour: cutoffHour, office: office}
+// NewAttendanceService creates an AttendanceService. locations and settings
+// may be nil: locations falls back to the legacy office point, settings
+// falls back to the "radius" photo policy.
+func NewAttendanceService(repo domain.AttendanceRepository, locations domain.LocationRepository, settings settingsProvider, cutoffHour int, office OfficeConfig) *AttendanceService {
+	return &AttendanceService{
+		repo:       repo,
+		locations:  locations,
+		settings:   settings,
+		cutoffHour: cutoffHour,
+		office:     office,
+	}
 }
 
 // CheckIn records a check-in for the user. The second check-in of the same
-// day is rejected.
+// day is rejected. Attendance outside the geofence radius is NO LONGER
+// rejected: the photo becomes mandatory and the record lands in
+// approval_status='pending' for admin/supervisor approval. Inside the
+// radius with a photo at an office/client location it is auto-approved.
 func (s *AttendanceService) CheckIn(ctx context.Context, in AttendanceInput) (*domain.Attendance, error) {
 	now, loc := resolveNow(in)
 	date := now.In(loc)
@@ -60,28 +88,33 @@ func (s *AttendanceService) CheckIn(ctx context.Context, in AttendanceInput) (*d
 		}
 	}
 
-	// Geofence: reject check-ins reported outside the office radius.
-	distM, err := s.office.checkGeofence(in.Latitude, in.Longitude)
+	geo, err := s.checkGeofence(ctx, in)
 	if err != nil {
 		return nil, err
 	}
+	if s.photoRequired(ctx, geo) && in.PhotoPath == "" {
+		return nil, ErrPhotoRequired
+	}
 
 	a := &domain.Attendance{
-		UserID:     in.UserID,
-		Type:       domain.AttendanceCheckIn,
-		Status:     s.statusFor(now, loc),
-		PhotoPath:  in.PhotoPath,
-		Latitude:   in.Latitude,
-		Longitude:  in.Longitude,
-		Address:    in.Address,
-		Notes:      in.Notes,
-		Device:     in.Device,
-		IPAddress:  in.IPAddress,
-		OccurredAt: now.UTC(),
-		CreatedAt:  time.Now().UTC(),
+		UserID:         in.UserID,
+		Type:           domain.AttendanceCheckIn,
+		Status:         s.statusFor(now, loc),
+		PhotoPath:      in.PhotoPath,
+		Latitude:       in.Latitude,
+		Longitude:      in.Longitude,
+		Address:        in.Address,
+		Notes:          in.Notes,
+		Device:         in.Device,
+		IPAddress:      in.IPAddress,
+		Source:         domain.SourceApp,
+		ApprovalStatus: approvalFor(geo, in.PhotoPath),
+		LocationID:     geo.LocationID,
+		OccurredAt:     now.UTC(),
+		CreatedAt:      time.Now().UTC(),
 	}
-	if in.Latitude != nil && in.Longitude != nil {
-		a.DistanceM = &distM
+	if geo.DistanceM != nil {
+		a.DistanceM = geo.DistanceM
 	}
 	if err := s.repo.Create(ctx, a); err != nil {
 		return nil, err
@@ -111,33 +144,48 @@ func (s *AttendanceService) CheckOut(ctx context.Context, in AttendanceInput) (*
 		return nil, ErrCheckOutBeforeCheckIn
 	}
 
-	// Geofence applies to check-outs too.
-	distM, err := s.office.checkGeofence(in.Latitude, in.Longitude)
+	geo, err := s.checkGeofence(ctx, in)
 	if err != nil {
 		return nil, err
 	}
+	if s.photoRequired(ctx, geo) && in.PhotoPath == "" {
+		return nil, ErrPhotoRequired
+	}
 
 	a := &domain.Attendance{
-		UserID:     in.UserID,
-		Type:       domain.AttendanceCheckOut,
-		Status:     domain.StatusOnTime, // status only meaningful for check-ins
-		PhotoPath:  in.PhotoPath,
-		Latitude:   in.Latitude,
-		Longitude:  in.Longitude,
-		Address:    in.Address,
-		Notes:      in.Notes,
-		Device:     in.Device,
-		IPAddress:  in.IPAddress,
-		OccurredAt: now.UTC(),
-		CreatedAt:  time.Now().UTC(),
+		UserID:         in.UserID,
+		Type:           domain.AttendanceCheckOut,
+		Status:         domain.StatusOnTime, // status only meaningful for check-ins
+		PhotoPath:      in.PhotoPath,
+		Latitude:       in.Latitude,
+		Longitude:      in.Longitude,
+		Address:        in.Address,
+		Notes:          in.Notes,
+		Device:         in.Device,
+		IPAddress:      in.IPAddress,
+		Source:         domain.SourceApp,
+		ApprovalStatus: approvalFor(geo, in.PhotoPath),
+		LocationID:     geo.LocationID,
+		OccurredAt:     now.UTC(),
+		CreatedAt:      time.Now().UTC(),
 	}
-	if in.Latitude != nil && in.Longitude != nil {
-		a.DistanceM = &distM
+	if geo.DistanceM != nil {
+		a.DistanceM = geo.DistanceM
 	}
 	if err := s.repo.Create(ctx, a); err != nil {
 		return nil, err
 	}
 	return a, nil
+}
+
+// approvalFor derives the initial approval status:
+// inside the radius at an office/client location WITH a photo → approved;
+// otherwise (outside radius, field location, or missing photo) → pending.
+func approvalFor(geo *geoResult, photoPath string) domain.ApprovalStatus {
+	if !geo.Outside && geo.LocationType != "field" && photoPath != "" {
+		return domain.ApprovalApproved
+	}
+	return domain.ApprovalPending
 }
 
 // TodayState summarises the user's attendance state for the current day,

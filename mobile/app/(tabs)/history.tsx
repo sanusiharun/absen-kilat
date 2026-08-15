@@ -10,8 +10,10 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { attendanceApi, Attendance } from '@/src/api/endpoints';
+import { ApprovalBadge } from '@/src/components/ApprovalBadge';
 import { colors, spacing } from '@/src/theme';
 
 const DAY_NAMES = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
@@ -131,21 +133,22 @@ export default function HistoryScreen() {
   ];
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            setRefreshing(true);
-            loadDay(selectedDate);
-            cacheRef.current = {};
-            loadDots(month);
-          }}
-        />
-      }
-    >
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadDay(selectedDate);
+              cacheRef.current = {};
+              loadDots(month);
+            }}
+          />
+        }
+      >
       <Text style={styles.header}>Riwayat Absen</Text>
 
       {/* Kalender mini */}
@@ -248,20 +251,25 @@ export default function HistoryScreen() {
                 <Text style={styles.recordType}>{isIn ? 'Absen Masuk' : 'Absen Keluar'}</Text>
                 <Text style={styles.recordTime}>{fmtTime(r.occurred_at)} WIB</Text>
               </View>
-              <View style={[styles.badge, { backgroundColor: badgeBg }]}>
-                <Text style={[styles.badgeText, { color: badgeColor }]}>
-                  {late ? 'Terlambat' : 'Tepat Waktu'}
-                </Text>
+              <View style={styles.recordBadges}>
+                <View style={[styles.badge, { backgroundColor: badgeBg }]}>
+                  <Text style={[styles.badgeText, { color: badgeColor }]}>
+                    {late ? 'Terlambat' : 'Tepat Waktu'}
+                  </Text>
+                </View>
+                <ApprovalBadge status={r.approval_status} />
               </View>
             </Pressable>
           );
         })
       )}
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.bg },
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xl },
   header: { fontSize: 24, fontWeight: '800', color: colors.text, marginBottom: spacing.xs },
@@ -334,6 +342,7 @@ const styles = StyleSheet.create({
   recordInfo: { flex: 1 },
   recordType: { fontSize: 15, fontWeight: '700', color: colors.text },
   recordTime: { fontSize: 13, color: colors.textMuted, marginTop: 1 },
+  recordBadges: { alignItems: 'flex-end', gap: 4 },
   badge: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: 999 },
   badgeText: { fontSize: 11, fontWeight: '700' },
   empty: { alignItems: 'center', marginTop: spacing.xl, gap: spacing.sm },

@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { notificationApi, Notification } from '@/src/api/endpoints';
 import { refreshUnread } from '@/src/hooks/useUnreadCount';
@@ -73,19 +74,20 @@ export default function NotificationsScreen() {
   const unreadCount = items.filter((n) => !n.is_read).length;
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => {
-            setRefreshing(true);
-            load();
-          }}
-        />
-      }
-    >
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              load();
+            }}
+          />
+        }
+      >
       <View style={styles.headerRow}>
         <Text style={styles.header}>Notifikasi</Text>
         {items.length > 0 ? (
@@ -136,11 +138,13 @@ export default function NotificationsScreen() {
           ))}
         </>
       )}
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.bg },
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xl },
   headerRow: {

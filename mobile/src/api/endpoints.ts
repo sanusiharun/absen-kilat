@@ -29,6 +29,26 @@ export interface Attendance {
   distance_m?: number;
   notes?: string;
   occurred_at: string;
+  // FASE B: status persetujuan + sumber absen + lokasi terpilih.
+  approval_status?: 'pending' | 'approved' | 'rejected';
+  source?: string;
+  location_id?: string;
+  location_name?: string;
+}
+
+// Lokasi absen (GET /locations): hanya yang active, type ∈ office|client|field.
+export interface AbsenLocation {
+  id: string;
+  name: string;
+  type: 'office' | 'client' | 'field';
+}
+
+// Pengaturan publik (GET /settings/public).
+export interface PublicSettings {
+  work_start: string;
+  work_end: string;
+  absen_mode: 'both' | 'checkin_only';
+  photo_policy: string;
 }
 
 export interface TodayState {
@@ -81,6 +101,15 @@ export const attendanceApi = {
 export const geocodeApi = {
   reverse: (lat: number, lng: number) =>
     api.get<{ address: string; short_address: string }>(`/geocode?lat=${lat}&lng=${lng}`),
+};
+
+// FASE B: daftar lokasi absen + pengaturan publik.
+export const locationApi = {
+  list: () => api.get<{ locations: AbsenLocation[] }>('/locations'),
+};
+
+export const settingsApi = {
+  public: () => api.get<PublicSettings>('/settings/public'),
 };
 
 export const notificationApi = {

@@ -56,10 +56,13 @@ type attendanceResponse struct {
 	Latitude   *float64 `json:"latitude,omitempty"`
 	Longitude  *float64 `json:"longitude,omitempty"`
 	Address    string   `json:"address,omitempty"`
-	Device     string   `json:"device,omitempty"`
-	IPAddress  string   `json:"ip_address,omitempty"`
-	DistanceM  *int     `json:"distance_m,omitempty"`
-	OccurredAt string   `json:"occurred_at"`
+	Device         string   `json:"device,omitempty"`
+	IPAddress      string   `json:"ip_address,omitempty"`
+	DistanceM      *int     `json:"distance_m,omitempty"`
+	Source         string   `json:"source"`
+	ApprovalStatus string   `json:"approval_status"`
+	LocationID     string   `json:"location_id,omitempty"`
+	OccurredAt     string   `json:"occurred_at"`
 }
 
 type todayResponse struct {
@@ -112,16 +115,17 @@ func (h *AttendanceHandler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := service.AttendanceInput{
-		UserID:    userID,
-		Type:      atype,
-		PhotoPath: photoPath,
-		Latitude:  lat,
-		Longitude: lng,
-		Address:   r.FormValue("address"),
-		Notes:     r.FormValue("notes"),
-		Device:    r.FormValue("device"),
-		IPAddress: clientIP(r.RemoteAddr),
-		Location:  time.Local,
+		UserID:     userID,
+		Type:       atype,
+		PhotoPath:  photoPath,
+		Latitude:   lat,
+		Longitude:  lng,
+		Address:    r.FormValue("address"),
+		Notes:      r.FormValue("notes"),
+		Device:     r.FormValue("device"),
+		IPAddress:  clientIP(r.RemoteAddr),
+		LocationID: r.FormValue("location_id"),
+		Location:   time.Local,
 	}
 
 	var (
@@ -218,15 +222,18 @@ func (h *AttendanceHandler) detail(w http.ResponseWriter, r *http.Request) {
 // toResponse converts a domain.Attendance to the API response shape.
 func (h *AttendanceHandler) toResponse(a *domain.Attendance) attendanceResponse {
 	resp := attendanceResponse{
-		ID:         a.ID,
-		Type:       string(a.Type),
-		Status:     string(a.Status),
-		PhotoURL:   a.PhotoPath,
-		Address:    a.Address,
-		Device:     a.Device,
-		IPAddress:  a.IPAddress,
-		DistanceM:  a.DistanceM,
-		OccurredAt: a.OccurredAt.Format(time.RFC3339),
+		ID:             a.ID,
+		Type:           string(a.Type),
+		Status:         string(a.Status),
+		PhotoURL:       a.PhotoPath,
+		Address:        a.Address,
+		Device:         a.Device,
+		IPAddress:      a.IPAddress,
+		DistanceM:      a.DistanceM,
+		Source:         string(a.Source),
+		ApprovalStatus: string(a.ApprovalStatus),
+		LocationID:     a.LocationID,
+		OccurredAt:     a.OccurredAt.Format(time.RFC3339),
 	}
 	if a.Latitude != nil {
 		resp.Latitude = a.Latitude

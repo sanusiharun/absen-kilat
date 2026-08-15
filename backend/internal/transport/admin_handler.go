@@ -23,8 +23,15 @@ type adminService interface {
 	Reports(ctx context.Context, loc *time.Location, days int) ([]service.DayReport, error)
 	Locations(ctx context.Context, limit int) ([]domain.LocationStat, error)
 	ListAttendances(ctx context.Context, f service.AttendanceFilter) ([]service.AdminAttendance, int, error)
-	CreateUser(ctx context.Context, email, password, name string, role domain.UserRole) (*domain.User, error)
+	CreateUser(ctx context.Context, in service.CreateUserInput) (*domain.User, error)
 	Devices(ctx context.Context) ([]domain.DeviceStat, error)
+	GetSettings(ctx context.Context) (*domain.Settings, error)
+	UpdateSettings(ctx context.Context, up service.SettingsUpdate) (*domain.Settings, error)
+	ListLocations(ctx context.Context, all bool) ([]domain.Location, error)
+	CreateLocation(ctx context.Context, in service.LocationInput) (*domain.Location, error)
+	UpdateLocation(ctx context.Context, id string, up service.LocationUpdate) (*domain.Location, error)
+	DeleteLocation(ctx context.Context, id string) error
+	OverrideAttendance(ctx context.Context, id, actorID string, ov service.OverrideInput) (*domain.Attendance, error)
 }
 
 // AdminHandler wires admin-only endpoints onto a router.
@@ -45,10 +52,19 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/admin/users", h.createUser)
 	r.Patch("/admin/users/{id}", h.updateUser)
 	r.Get("/admin/trends", h.trends)
-	r.Get("/admin/locations", h.locations)
+	r.Get("/admin/locations", h.listLocations)
+	r.Post("/admin/locations", h.createLocation)
+	r.Patch("/admin/locations/{id}", h.updateLocation)
+	r.Delete("/admin/locations/{id}", h.deleteLocation)
+	// Breakdown of attendance addresses (dashboard chart) — kept separate
+	// from the locations CRUD list.
+	r.Get("/admin/locations/breakdown", h.locationsBreakdown)
 	r.Get("/admin/reports", h.reports)
 	r.Get("/admin/attendance", h.attendance)
+	r.Patch("/admin/attendance/{id}", h.overrideAttendance)
 	r.Get("/admin/devices", h.devices)
+	r.Get("/admin/settings", h.getSettings)
+	r.Put("/admin/settings", h.putSettings)
 }
 
 func (h *AdminHandler) stats(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +94,14 @@ type adminUserResponse struct {
 	Role            string `json:"role"`
 	IsActive        bool   `json:"is_active"`
 	IsEmailVerified bool   `json:"is_email_verified"`
+	NIP             string `json:"nip"`
+	Phone           string `json:"phone"`
+	Department      string `json:"department"`
+	Position        string `json:"position"`
+	Address         string `json:"address"`
+	JoinDate        string `json:"join_date"`
+	ManagerID       string `json:"manager_id"`
+	EmployeeCode    string `json:"employee_code"`
 	CreatedAt       string `json:"created_at"`
 }
 
@@ -90,6 +114,14 @@ func toAdminUserResponse(u *domain.User) adminUserResponse {
 		Role:            string(u.Role),
 		IsActive:        u.IsActive,
 		IsEmailVerified: u.IsEmailVerified,
+		NIP:             u.NIP,
+		Phone:           u.Phone,
+		Department:      u.Department,
+		Position:        u.Position,
+		Address:         u.Address,
+		JoinDate:        u.JoinDate,
+		ManagerID:       u.ManagerID,
+		EmployeeCode:    u.EmployeeCode,
 		CreatedAt:       u.CreatedAt.Format(time.RFC3339),
 	}
 }
@@ -123,15 +155,19 @@ func (h *AdminHandler) updateUser(w http.ResponseWriter, r *http.Request) {
 	targetID := chi.URLParam(r, "id")
 
 	var body struct {
-		Role     *string `json:"role"`
-		IsActive *bool   `json:"is_active"`
+		Role         *string `json:"role"`
+		IsActive     *bool   `json:"is_active"`
+		NIP          *string `json:"nip"`
+		Phone        *string `json:"phone"`
+		Department   *string `json:"department"`
+		Position     *string `json:"position"`
+		Address      *string `json:"address"`
+		JoinDate     *string `json:"join_date"`
+		ManagerID    *string `json:"manager_id"`
+		EmployeeCode *string `json:"employee_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteHTTPError(w, httpx.ErrBadRequest)
-		return
-	}
-	if body.Role == nil && body.IsActive == nil {
-		httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "provide role and/or is_active"))
 		return
 	}
 
@@ -146,9 +182,15 @@ func (h *AdminHandler) updateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if body.IsActive != nil {
-		up.IsActive = body.IsActive
-	}
+	up.IsActive = body.IsActive
+	up.NIP = body.NIP
+	up.Phone = body.Phone
+	up.Department = body.Department
+	up.Position = body.Position
+	up.Address = body.Address
+	up.JoinDate = body.JoinDate
+	up.ManagerID = body.ManagerID
+	up.EmployeeCode = body.EmployeeCode
 
 	u, err := h.svc.UpdateUser(r.Context(), targetID, actorID, up)
 	if err != nil {
@@ -156,6 +198,39 @@ func (h *AdminHandler) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteOK(w, map[string]any{"user": toAdminUserResponse(u)})
+}
+
+func (h *AdminHandler) createUser(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name         string `json:"name"`
+		Email        string `json:"email"`
+		Password     string `json:"password"`
+		Role         string `json:"role"`
+		EmployeeCode string `json:"employee_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.WriteHTTPError(w, httpx.ErrBadRequest)
+		return
+	}
+
+	role := domain.UserRole(body.Role)
+	if body.Role != "" && role != domain.RoleAdmin && role != domain.RoleEmployee {
+		httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "role must be admin or employee"))
+		return
+	}
+
+	u, err := h.svc.CreateUser(r.Context(), service.CreateUserInput{
+		Email:        body.Email,
+		Password:     body.Password,
+		Name:         body.Name,
+		Role:         role,
+		EmployeeCode: body.EmployeeCode,
+	})
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteCreated(w, map[string]any{"user": toAdminUserResponse(u)})
 }
 
 func (h *AdminHandler) trends(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +272,8 @@ func (h *AdminHandler) reports(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteOK(w, map[string]any{"reports": resp})
 }
 
-func (h *AdminHandler) locations(w http.ResponseWriter, r *http.Request) {
+// locationsBreakdown returns the top attendance addresses (dashboard chart).
+func (h *AdminHandler) locationsBreakdown(w http.ResponseWriter, r *http.Request) {
 	limit := 5
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
@@ -229,6 +305,12 @@ func (h *AdminHandler) attendance(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "type must be check_in or check_out"))
 		return
 	}
+	approval := q.Get("approval")
+	if approval != "" && approval != string(domain.ApprovalPending) &&
+		approval != string(domain.ApprovalApproved) && approval != string(domain.ApprovalRejected) {
+		httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "approval must be pending, approved, or rejected"))
+		return
+	}
 	limit := 100
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -246,13 +328,14 @@ func (h *AdminHandler) attendance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	list, total, err := h.svc.ListAttendances(r.Context(), service.AttendanceFilter{
-		From:   q.Get("from"),
-		To:     q.Get("to"),
-		Status: status,
-		Type:   atype,
-		Search: q.Get("search"),
-		Limit:  limit,
-		Offset: offset,
+		From:           q.Get("from"),
+		To:             q.Get("to"),
+		Status:         status,
+		Type:           atype,
+		ApprovalStatus: approval,
+		Search:         q.Get("search"),
+		Limit:          limit,
+		Offset:         offset,
 	})
 	if err != nil {
 		h.ttpxErr(w, err)
@@ -261,50 +344,124 @@ func (h *AdminHandler) attendance(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]map[string]any, 0, len(list))
 	for _, a := range list {
-		resp = append(resp, map[string]any{
-			"id":          a.ID,
-			"user_id":     a.UserID,
-			"user_name":   a.UserName,
-			"user_email":  a.UserEmail,
-			"type":        string(a.Type),
-			"status":      string(a.Status),
-			"photo_url":   a.PhotoURL,
-			"address":     a.Address,
-			"latitude":    a.Latitude,
-			"longitude":   a.Longitude,
-			"device":      a.Device,
-			"ip_address":  a.IPAddress,
-			"distance_m":  a.DistanceM,
-			"occurred_at": a.OccurredAt.Format(time.RFC3339),
-		})
+		row := map[string]any{
+			"id":               a.ID,
+			"user_id":          a.UserID,
+			"user_name":        a.UserName,
+			"user_email":       a.UserEmail,
+			"type":             string(a.Type),
+			"status":           string(a.Status),
+			"photo_url":        a.PhotoURL,
+			"address":          a.Address,
+			"latitude":         a.Latitude,
+			"longitude":        a.Longitude,
+			"device":           a.Device,
+			"ip_address":       a.IPAddress,
+			"distance_m":       a.DistanceM,
+			"source":           string(a.Source),
+			"approval_status":  string(a.ApprovalStatus),
+			"approved_by":      a.ApprovedBy,
+			"rejection_reason": a.RejectionReason,
+			"location_id":      a.LocationID,
+			"occurred_at":      a.OccurredAt.Format(time.RFC3339),
+		}
+		if a.ApprovedAt != nil {
+			row["approved_at"] = a.ApprovedAt.Format(time.RFC3339)
+		}
+		resp = append(resp, row)
 	}
 	httpx.WriteOK(w, map[string]any{"attendances": resp, "total": total})
 }
 
-func (h *AdminHandler) createUser(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandler) overrideAttendance(w http.ResponseWriter, r *http.Request) {
+	actorID := UserIDFromContext(r.Context())
+	if actorID == "" {
+		httpx.WriteHTTPError(w, httpx.ErrUnauthorized)
+		return
+	}
+	id := chi.URLParam(r, "id")
+
 	var body struct {
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		Role     string `json:"role"`
+		Type           *string `json:"type"`
+		Status         *string `json:"status"` // on_time|late OR approval shorthand pending|approved|rejected
+		ApprovalStatus *string `json:"approval_status"`
+		OccurredAt     *string `json:"occurred_at"`
+		Reason         string  `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteHTTPError(w, httpx.ErrBadRequest)
 		return
 	}
 
-	role := domain.UserRole(body.Role)
-	if body.Role != "" && role != domain.RoleAdmin && role != domain.RoleEmployee {
-		httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "role must be admin or employee"))
-		return
+	ov := service.OverrideInput{Reason: body.Reason}
+
+	// `status` doubles as attendance status (on_time|late) or, for
+	// compatibility with the issue spec, an approval status shorthand.
+	if body.Status != nil {
+		switch *body.Status {
+		case string(domain.StatusOnTime), string(domain.StatusLate):
+			st := domain.AttendanceStatus(*body.Status)
+			ov.Status = &st
+		case string(domain.ApprovalPending), string(domain.ApprovalApproved), string(domain.ApprovalRejected):
+			as := domain.ApprovalStatus(*body.Status)
+			ov.ApprovalStatus = &as
+		default:
+			httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "status must be on_time, late, pending, approved, or rejected"))
+			return
+		}
+	}
+	if body.ApprovalStatus != nil {
+		as := domain.ApprovalStatus(*body.ApprovalStatus)
+		if as != domain.ApprovalPending && as != domain.ApprovalApproved && as != domain.ApprovalRejected {
+			httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "approval_status must be pending, approved, or rejected"))
+			return
+		}
+		ov.ApprovalStatus = &as
+	}
+	if body.Type != nil {
+		t := domain.AttendanceType(*body.Type)
+		if t != domain.AttendanceCheckIn && t != domain.AttendanceCheckOut {
+			httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "type must be check_in or check_out"))
+			return
+		}
+		ov.Type = &t
+	}
+	if body.OccurredAt != nil && *body.OccurredAt != "" {
+		t, err := time.Parse(time.RFC3339, *body.OccurredAt)
+		if err != nil {
+			httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "occurred_at must be RFC3339"))
+			return
+		}
+		ov.OccurredAt = &t
 	}
 
-	u, err := h.svc.CreateUser(r.Context(), body.Email, body.Password, body.Name, role)
+	a, err := h.svc.OverrideAttendance(r.Context(), id, actorID, ov)
 	if err != nil {
 		h.ttpxErr(w, err)
 		return
 	}
-	httpx.WriteCreated(w, map[string]any{"user": toAdminUserResponse(u)})
+	httpx.WriteOK(w, map[string]any{"attendance": toAdminAttendanceRow(a)})
+}
+
+// toAdminAttendanceRow renders a single attendance for admin responses.
+func toAdminAttendanceRow(a *domain.Attendance) map[string]any {
+	row := map[string]any{
+		"id":               a.ID,
+		"user_id":          a.UserID,
+		"type":             string(a.Type),
+		"status":           string(a.Status),
+		"photo_url":        a.PhotoPath,
+		"source":           string(a.Source),
+		"approval_status":  string(a.ApprovalStatus),
+		"approved_by":      a.ApprovedBy,
+		"rejection_reason": a.RejectionReason,
+		"location_id":      a.LocationID,
+		"occurred_at":      a.OccurredAt.In(time.Local).Format(time.RFC3339),
+	}
+	if a.ApprovedAt != nil {
+		row["approved_at"] = a.ApprovedAt.In(time.Local).Format(time.RFC3339)
+	}
+	return row
 }
 
 func (h *AdminHandler) devices(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +475,156 @@ func (h *AdminHandler) devices(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, map[string]any{"device": d.Device, "count": d.Count})
 	}
 	httpx.WriteOK(w, map[string]any{"devices": resp})
+}
+
+// ===== Settings =====
+
+func (h *AdminHandler) getSettings(w http.ResponseWriter, r *http.Request) {
+	st, err := h.svc.GetSettings(r.Context())
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteOK(w, map[string]any{"settings": settingsResponse(st)})
+}
+
+func (h *AdminHandler) putSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WorkStart   *string   `json:"work_start"`
+		WorkEnd     *string   `json:"work_end"`
+		AbsenMode   *string   `json:"absen_mode"`
+		Workdays    *[]string `json:"workdays"`
+		PhotoPolicy *string   `json:"photo_policy"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.WriteHTTPError(w, httpx.ErrBadRequest)
+		return
+	}
+	st, err := h.svc.UpdateSettings(r.Context(), service.SettingsUpdate{
+		WorkStart:   body.WorkStart,
+		WorkEnd:     body.WorkEnd,
+		AbsenMode:   body.AbsenMode,
+		Workdays:    body.Workdays,
+		PhotoPolicy: body.PhotoPolicy,
+	})
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteOK(w, map[string]any{"settings": settingsResponse(st)})
+}
+
+func settingsResponse(st *domain.Settings) map[string]any {
+	return map[string]any{
+		"work_start":   st.WorkStart,
+		"work_end":     st.WorkEnd,
+		"absen_mode":   st.AbsenMode,
+		"workdays":     st.Workdays,
+		"photo_policy": st.PhotoPolicy,
+	}
+}
+
+// ===== Locations CRUD =====
+
+func (h *AdminHandler) listLocations(w http.ResponseWriter, r *http.Request) {
+	all := r.URL.Query().Get("all") == "1"
+	locs, err := h.svc.ListLocations(r.Context(), all)
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteOK(w, map[string]any{"locations": locationResponses(locs)})
+}
+
+func (h *AdminHandler) createLocation(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name    string  `json:"name"`
+		Type    string  `json:"type"`
+		Lat     float64 `json:"lat"`
+		Lng     float64 `json:"lng"`
+		RadiusM int     `json:"radius_m"`
+		Active  *bool   `json:"active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.WriteHTTPError(w, httpx.ErrBadRequest)
+		return
+	}
+	active := true
+	if body.Active != nil {
+		active = *body.Active
+	}
+	l, err := h.svc.CreateLocation(r.Context(), service.LocationInput{
+		Name:    body.Name,
+		Type:    body.Type,
+		Lat:     body.Lat,
+		Lng:     body.Lng,
+		RadiusM: body.RadiusM,
+		Active:  active,
+	})
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteCreated(w, map[string]any{"location": locationResponse(l)})
+}
+
+func (h *AdminHandler) updateLocation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var body struct {
+		Name    *string  `json:"name"`
+		Type    *string  `json:"type"`
+		Lat     *float64 `json:"lat"`
+		Lng     *float64 `json:"lng"`
+		RadiusM *int     `json:"radius_m"`
+		Active  *bool    `json:"active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.WriteHTTPError(w, httpx.ErrBadRequest)
+		return
+	}
+	l, err := h.svc.UpdateLocation(r.Context(), id, service.LocationUpdate{
+		Name:    body.Name,
+		Type:    body.Type,
+		Lat:     body.Lat,
+		Lng:     body.Lng,
+		RadiusM: body.RadiusM,
+		Active:  body.Active,
+	})
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteOK(w, map[string]any{"location": locationResponse(l)})
+}
+
+func (h *AdminHandler) deleteLocation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.svc.DeleteLocation(r.Context(), id); err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteOK(w, map[string]any{"deleted": true})
+}
+
+func locationResponses(locs []domain.Location) []map[string]any {
+	out := make([]map[string]any, 0, len(locs))
+	for i := range locs {
+		out = append(out, locationResponse(&locs[i]))
+	}
+	return out
+}
+
+func locationResponse(l *domain.Location) map[string]any {
+	return map[string]any{
+		"id":         l.ID,
+		"name":       l.Name,
+		"type":       l.Type,
+		"lat":        l.Lat,
+		"lng":        l.Lng,
+		"radius_m":   l.RadiusM,
+		"active":     l.Active,
+		"created_at": l.CreatedAt.Format(time.RFC3339),
+	}
 }
 
 // parseDays reads the ?days= query parameter, clamped to a sane range, falling

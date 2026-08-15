@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -12,18 +13,21 @@ import (
 	pkgerrors "github.com/sanusi/absen-kilat/backend/pkg/errors"
 )
 
-// AdminService provides the admin dashboard's data needs: account seeding and
-// aggregate statistics. It composes the concrete repositories (app-level
+// AdminService provides the admin dashboard's data needs: account seeding,
+// aggregate statistics, location management, system settings, and
+// attendance overrides. It composes the concrete repositories (app-level
 // concern) rather than going through the domain interfaces.
 type AdminService struct {
 	users       *repo.UserRepository
 	attendances *repo.AttendanceRepository
+	locations   *repo.LocationRepository
+	settings    *SettingsService
 	adminEmail  string
 }
 
 // NewAdminService creates an AdminService.
-func NewAdminService(users *repo.UserRepository, attendances *repo.AttendanceRepository, adminEmail string) *AdminService {
-	return &AdminService{users: users, attendances: attendances, adminEmail: adminEmail}
+func NewAdminService(users *repo.UserRepository, attendances *repo.AttendanceRepository, locations *repo.LocationRepository, settings *SettingsService, adminEmail string) *AdminService {
+	return &AdminService{users: users, attendances: attendances, locations: locations, settings: settings, adminEmail: adminEmail}
 }
 
 // SeedAdmin creates the initial admin account (role=admin) if one with the
@@ -90,8 +94,16 @@ func (s *AdminService) TodayStats(ctx context.Context, loc *time.Location) (*Tod
 // UserUpdate describes an optional administrative change to a user account.
 // Nil fields are left unchanged.
 type UserUpdate struct {
-	Role     *domain.UserRole
-	IsActive *bool
+	Role         *domain.UserRole
+	IsActive     *bool
+	NIP          *string
+	Phone        *string
+	Department   *string
+	Position     *string
+	Address      *string
+	JoinDate     *string
+	ManagerID    *string
+	EmployeeCode *string
 }
 
 // ListUsers returns users, optionally filtered by a case-insensitive search
@@ -100,9 +112,9 @@ func (s *AdminService) ListUsers(ctx context.Context, search, status string) ([]
 	return s.users.ListFiltered(ctx, search, status)
 }
 
-// UpdateUser applies an administrative change (role and/or is_active) to the
-// target user. An admin cannot deactivate or demote their own account, which
-// would lock them out of admin access.
+// UpdateUser applies an administrative change to the target user. An admin
+// cannot deactivate or demote their own account, which would lock them out
+// of admin access.
 func (s *AdminService) UpdateUser(ctx context.Context, targetID, actorID string, up UserUpdate) (*domain.User, error) {
 	u, err := s.users.FindByID(ctx, targetID)
 	if err != nil {
@@ -122,10 +134,51 @@ func (s *AdminService) UpdateUser(ctx context.Context, targetID, actorID string,
 	if up.IsActive != nil {
 		u.IsActive = *up.IsActive
 	}
+	applyProfileUpdate(u, up)
 	if err := s.users.Update(ctx, u); err != nil {
 		return nil, err
 	}
 	return u, nil
+}
+
+// applyProfileUpdate copies the non-nil profile fields onto the user.
+func applyProfileUpdate(u *domain.User, up UserUpdate) {
+	if up.NIP != nil {
+		u.NIP = *up.NIP
+	}
+	if up.Phone != nil {
+		u.Phone = *up.Phone
+	}
+	if up.Department != nil {
+		u.Department = *up.Department
+	}
+	if up.Position != nil {
+		u.Position = *up.Position
+	}
+	if up.Address != nil {
+		u.Address = *up.Address
+	}
+	if up.JoinDate != nil {
+		u.JoinDate = *up.JoinDate
+	}
+	if up.ManagerID != nil {
+		u.ManagerID = *up.ManagerID
+	}
+	if up.EmployeeCode != nil {
+		u.EmployeeCode = *up.EmployeeCode
+	}
+}
+
+// validateManagerID verifies that a non-empty manager_id references an
+// existing user.
+func (s *AdminService) validateManagerID(ctx context.Context, managerID string) error {
+	if managerID == "" {
+		return nil
+	}
+	if _, err := s.users.FindByID(ctx, managerID); err != nil {
+		return pkgerrors.Validation("manager_id", "pengguna tidak ditemukan")
+	}
+	return nil
 }
 
 // DayTrend is one row of the attendance line chart: a calendar date with the
@@ -209,44 +262,52 @@ func (s *AdminService) Locations(ctx context.Context, limit int) ([]domain.Locat
 // AdminAttendance is one row of the admin attendance listing: an attendance
 // record joined with the user who recorded it.
 type AdminAttendance struct {
-	ID         string
-	UserID     string
-	UserName   string
-	UserEmail  string
-	Type       domain.AttendanceType
-	Status     domain.AttendanceStatus
-	PhotoURL   string
-	Address    string
-	Latitude   *float64
-	Longitude  *float64
-	Device     string
-	IPAddress  string
-	DistanceM  *int
-	OccurredAt time.Time
+	ID              string
+	UserID          string
+	UserName        string
+	UserEmail       string
+	Type            domain.AttendanceType
+	Status          domain.AttendanceStatus
+	PhotoURL        string
+	Address         string
+	Latitude        *float64
+	Longitude       *float64
+	Device          string
+	IPAddress       string
+	DistanceM       *int
+	Source          domain.AttendanceSource
+	ApprovalStatus  domain.ApprovalStatus
+	ApprovedBy      string
+	ApprovedAt      *time.Time
+	RejectionReason string
+	LocationID      string
+	OccurredAt      time.Time
 }
 
 // AttendanceFilter describes the optional filters of the admin attendance
 // listing. From/To are calendar dates (YYYY-MM-DD) in the server's local
 // timezone, inclusive/exclusive respectively; empty means unbounded.
 type AttendanceFilter struct {
-	From   string
-	To     string
-	Status string
-	Type   string
-	Search string
-	Limit  int
-	Offset int
+	From           string
+	To             string
+	Status         string
+	Type           string
+	ApprovalStatus string
+	Search         string
+	Limit          int
+	Offset         int
 }
 
 // ListAttendances returns attendance rows joined with user info, newest
 // first, along with the total number of matching rows (before limit/offset).
 func (s *AdminService) ListAttendances(ctx context.Context, f AttendanceFilter) ([]AdminAttendance, int, error) {
 	rf := repo.AdminAttendanceFilter{
-		Status: f.Status,
-		Type:   f.Type,
-		Search: f.Search,
-		Limit:  f.Limit,
-		Offset: f.Offset,
+		Status:         f.Status,
+		Type:           f.Type,
+		ApprovalStatus: f.ApprovalStatus,
+		Search:         f.Search,
+		Limit:          f.Limit,
+		Offset:         f.Offset,
 	}
 	if f.From != "" {
 		start, err := time.ParseInLocation("2006-01-02", f.From, time.Local)
@@ -270,16 +331,20 @@ func (s *AdminService) ListAttendances(ctx context.Context, f AttendanceFilter) 
 	out := make([]AdminAttendance, 0, len(rows))
 	for _, r := range rows {
 		a := AdminAttendance{
-			ID:        r.ID,
-			UserID:    r.UserID,
-			UserName:  r.UserName,
-			UserEmail: r.UserEmail,
-			Type:      domain.AttendanceType(r.Type),
-			Status:    domain.AttendanceStatus(r.Status),
-			PhotoURL:  r.PhotoPath,
-			Address:   r.Address,
-			Device:    r.Device,
-			IPAddress: r.IPAddress,
+			ID:              r.ID,
+			UserID:          r.UserID,
+			UserName:        r.UserName,
+			UserEmail:       r.UserEmail,
+			Type:            domain.AttendanceType(r.Type),
+			Status:          domain.AttendanceStatus(r.Status),
+			PhotoURL:        r.PhotoPath,
+			Address:         r.Address,
+			Device:          r.Device,
+			IPAddress:       r.IPAddress,
+			Source:          domain.AttendanceSource(r.Source),
+			ApprovalStatus:  domain.ApprovalStatus(r.ApprovalStatus),
+			RejectionReason: r.RejectionReason,
+			LocationID:      r.LocationID.String,
 			// Stored as UTC; present in the server's local zone so admin
 			// UI timestamps read naturally.
 			OccurredAt: parseRFC3339Nano(r.OccurredAt).In(time.Local),
@@ -294,43 +359,61 @@ func (s *AdminService) ListAttendances(ctx context.Context, f AttendanceFilter) 
 			dm := int(r.DistanceM.Int64)
 			a.DistanceM = &dm
 		}
+		if r.ApprovedBy.Valid {
+			a.ApprovedBy = r.ApprovedBy.String
+		}
+		if r.ApprovedAt.Valid {
+			t := parseRFC3339Nano(r.ApprovedAt.String).In(time.Local)
+			a.ApprovedAt = &t
+		}
 		out = append(out, a)
 	}
 	return out, total, nil
 }
 
+// CreateUserInput carries the fields for admin-created accounts.
+type CreateUserInput struct {
+	Email        string
+	Password     string
+	Name         string
+	Role         domain.UserRole
+	EmployeeCode string
+}
+
 // CreateUser creates a new account on behalf of an admin. The account starts
 // active and email-verified (the admin vouches for it).
-func (s *AdminService) CreateUser(ctx context.Context, email, password, name string, role domain.UserRole) (*domain.User, error) {
+func (s *AdminService) CreateUser(ctx context.Context, in CreateUserInput) (*domain.User, error) {
 	fields := map[string]string{}
-	if email == "" || !emailRe.MatchString(email) {
+	if in.Email == "" || !emailRe.MatchString(in.Email) {
 		fields["email"] = "must be a valid email address"
 	}
-	if len(password) < 8 {
+	if len(in.Password) < 8 {
 		fields["password"] = "must be at least 8 characters"
 	}
-	if name == "" {
+	if in.Name == "" {
 		fields["name"] = "is required"
 	}
-	if role != "" && role != domain.RoleAdmin && role != domain.RoleEmployee {
+	if in.Role != "" && in.Role != domain.RoleAdmin && in.Role != domain.RoleEmployee {
 		fields["role"] = "must be admin or employee"
 	}
 	if len(fields) > 0 {
 		return nil, pkgerrors.ValidationMulti(fields)
 	}
-	if role == "" {
-		role = domain.RoleEmployee
+	if in.Role == "" {
+		in.Role = domain.RoleEmployee
 	}
+	in.EmployeeCode = strings.TrimSpace(in.EmployeeCode)
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("service.AdminService.CreateUser: hash: %w", err)
 	}
 	user := &domain.User{
-		Email:               email,
+		Email:               in.Email,
 		PasswordHash:        string(hash),
-		Name:                name,
-		Role:                role,
+		Name:                in.Name,
+		Role:                in.Role,
+		EmployeeCode:        in.EmployeeCode,
 		IsActive:            true,
 		IsEmailVerified:     true,
 		NotificationEnabled: true,
@@ -353,4 +436,223 @@ func parseRFC3339Nano(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// ===== Settings (admin) =====
+
+// GetSettings returns the full system settings.
+func (s *AdminService) GetSettings(ctx context.Context) (*domain.Settings, error) {
+	return s.settings.Get(ctx)
+}
+
+// UpdateSettings validates and applies settings changes.
+func (s *AdminService) UpdateSettings(ctx context.Context, up SettingsUpdate) (*domain.Settings, error) {
+	return s.settings.Update(ctx, up)
+}
+
+// ===== Locations (admin CRUD) =====
+
+// LocationInput carries the fields for creating a location.
+type LocationInput struct {
+	Name    string
+	Type    string // office | client | field
+	Lat     float64
+	Lng     float64
+	RadiusM int
+	Active  bool
+}
+
+// LocationUpdate carries optional changes for a location; nil fields are
+// left unchanged.
+type LocationUpdate struct {
+	Name    *string
+	Type    *string
+	Lat     *float64
+	Lng     *float64
+	RadiusM *int
+	Active  *bool
+}
+
+// ListLocations returns locations; all=false filters to active only.
+func (s *AdminService) ListLocations(ctx context.Context, all bool) ([]domain.Location, error) {
+	if all {
+		return s.locations.ListAll(ctx)
+	}
+	return s.locations.ListActive(ctx)
+}
+
+// CreateLocation validates and inserts a new location.
+func (s *AdminService) CreateLocation(ctx context.Context, in LocationInput) (*domain.Location, error) {
+	if err := validateLocationFields(in.Name, in.Type, in.Lat, in.Lng, in.RadiusM); err != nil {
+		return nil, err
+	}
+	l := &domain.Location{
+		Name:    in.Name,
+		Type:    in.Type,
+		Lat:     in.Lat,
+		Lng:     in.Lng,
+		RadiusM: in.RadiusM,
+		Active:  in.Active,
+	}
+	if err := s.locations.Create(ctx, l); err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
+// UpdateLocation applies the provided changes to a location.
+func (s *AdminService) UpdateLocation(ctx context.Context, id string, up LocationUpdate) (*domain.Location, error) {
+	l, err := s.locations.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if up.Name != nil {
+		l.Name = *up.Name
+	}
+	if up.Type != nil {
+		l.Type = *up.Type
+	}
+	if up.Lat != nil {
+		l.Lat = *up.Lat
+	}
+	if up.Lng != nil {
+		l.Lng = *up.Lng
+	}
+	if up.RadiusM != nil {
+		l.RadiusM = *up.RadiusM
+	}
+	if up.Active != nil {
+		l.Active = *up.Active
+	}
+	if err := validateLocationFields(l.Name, l.Type, l.Lat, l.Lng, l.RadiusM); err != nil {
+		return nil, err
+	}
+	if err := s.locations.Update(ctx, l); err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
+// DeleteLocation soft-deletes a location (active=0).
+func (s *AdminService) DeleteLocation(ctx context.Context, id string) error {
+	return s.locations.SetActive(ctx, id, false)
+}
+
+// validateLocationFields checks the location business rules.
+func validateLocationFields(name, typ string, lat, lng float64, radiusM int) error {
+	fields := map[string]string{}
+	if name == "" {
+		fields["name"] = "is required"
+	}
+	if typ != "office" && typ != "client" && typ != "field" {
+		fields["type"] = "must be office, client, or field"
+	}
+	if lat < -90 || lat > 90 {
+		fields["lat"] = "must be between -90 and 90"
+	}
+	if lng < -180 || lng > 180 {
+		fields["lng"] = "must be between -180 and 180"
+	}
+	if radiusM < 0 || radiusM > 100000 {
+		fields["radius_m"] = "must be between 0 and 100000"
+	}
+	if len(fields) > 0 {
+		return pkgerrors.ValidationMulti(fields)
+	}
+	return nil
+}
+
+// ===== Attendance override (issue #10) =====
+
+// OverrideInput carries the optional changes of an admin attendance
+// override. Reason is always required and recorded in the approval log.
+type OverrideInput struct {
+	Type           *domain.AttendanceType
+	Status         *domain.AttendanceStatus  // on_time | late
+	ApprovalStatus *domain.ApprovalStatus    // pending | approved | rejected
+	OccurredAt     *time.Time
+	Reason         string
+}
+
+// OverrideAttendance edits an attendance record on behalf of an admin,
+// writes an approval_log(action='override') entry, and reflects the new
+// approval status (approved/rejected) on the record.
+func (s *AdminService) OverrideAttendance(ctx context.Context, id, actorID string, ov OverrideInput) (*domain.Attendance, error) {
+	if strings.TrimSpace(ov.Reason) == "" {
+		return nil, pkgerrors.Validation("reason", "alasan wajib diisi")
+	}
+	a, err := s.attendances.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	changed := false
+	if ov.Type != nil {
+		if *ov.Type != domain.AttendanceCheckIn && *ov.Type != domain.AttendanceCheckOut {
+			return nil, pkgerrors.Validation("type", "must be check_in or check_out")
+		}
+		a.Type = *ov.Type
+		changed = true
+	}
+	if ov.Status != nil {
+		if *ov.Status != domain.StatusOnTime && *ov.Status != domain.StatusLate {
+			return nil, pkgerrors.Validation("status", "must be on_time or late")
+		}
+		a.Status = *ov.Status
+		changed = true
+	}
+	if ov.OccurredAt != nil {
+		a.OccurredAt = ov.OccurredAt.UTC()
+		changed = true
+	}
+	if ov.ApprovalStatus != nil {
+		if err := s.applyApprovalChange(a, actorID, *ov.ApprovalStatus, ov.Reason); err != nil {
+			return nil, err
+		}
+		changed = true
+	}
+	if !changed {
+		return nil, pkgerrors.Validation("body", "tidak ada perubahan yang diberikan")
+	}
+
+	if err := s.attendances.UpdateAttendance(ctx, a); err != nil {
+		return nil, err
+	}
+	log := &domain.ApprovalLog{
+		AttendanceID: id,
+		ActorID:      actorID,
+		Action:       "override",
+		Reason:       ov.Reason,
+	}
+	if err := s.attendances.InsertApprovalLog(ctx, log); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// applyApprovalChange sets the approval state of a record (and stamps the
+// actor/time when it is finalized).
+func (s *AdminService) applyApprovalChange(a *domain.Attendance, actorID string, status domain.ApprovalStatus, reason string) error {
+	switch status {
+	case domain.ApprovalApproved:
+		now := time.Now().UTC()
+		a.ApprovalStatus = domain.ApprovalApproved
+		a.ApprovedBy = actorID
+		a.ApprovedAt = &now
+		a.RejectionReason = ""
+	case domain.ApprovalRejected:
+		now := time.Now().UTC()
+		a.ApprovalStatus = domain.ApprovalRejected
+		a.ApprovedBy = actorID
+		a.ApprovedAt = &now
+		a.RejectionReason = reason
+	case domain.ApprovalPending:
+		a.ApprovalStatus = domain.ApprovalPending
+		a.ApprovedBy = ""
+		a.ApprovedAt = nil
+		a.RejectionReason = ""
+	default:
+		return pkgerrors.Validation("status", "must be pending, approved, or rejected")
+	}
+	return nil
 }

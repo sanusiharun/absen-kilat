@@ -33,7 +33,10 @@ const NAV_UTAMA: NavItem[] = [
   { label: "Device", href: "/device", icon: "device" },
 ];
 
-const NAV_PENGATURAN: NavItem[] = [{ label: "Akun Admin", href: "/akun-admin", icon: "user" }];
+const NAV_PENGATURAN: NavItem[] = [
+  { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
+  { label: "Akun Admin", href: "/akun-admin", icon: "user" },
+];
 
 export default function AdminShell({
   title,

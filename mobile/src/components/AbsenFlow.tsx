@@ -21,13 +21,24 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { attendanceApi, geocodeApi } from '@/src/api/endpoints';
+import { attendanceApi, geocodeApi, locationApi, AbsenLocation } from '@/src/api/endpoints';
 import { Button } from '@/src/components/AuthForm';
+import { LOCATION_TYPE_ICON, LOCATION_TYPE_LABEL, LocationPicker } from '@/src/components/LocationPicker';
 import { colors, spacing } from '@/src/theme';
+import {
+  clearAbsenLocation,
+  getSavedAbsenLocation,
+  saveAbsenLocation,
+  LocationChoice,
+} from '@/src/utils/absenLocation';
 import { compressImage } from '@/src/utils/image';
 
 interface AbsenFlowProps {
   type: 'check_in' | 'check_out';
+  // Lokasi terpilih dari Home (params route). Kalau kosong, baca default tersimpan.
+  initialLocationId?: string;
+  initialLocationName?: string;
+  initialLocationType?: string;
 }
 
 interface Coords {
@@ -36,7 +47,7 @@ interface Coords {
   accuracy: number;
 }
 
-export function AbsenFlow({ type }: AbsenFlowProps) {
+export function AbsenFlow({ type, initialLocationId, initialLocationName, initialLocationType }: AbsenFlowProps) {
   const router = useRouter();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -51,6 +62,12 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
   const [geocoding, setGeocoding] = useState(false);
   const [address, setAddress] = useState('');
 
+  // FASE B: lokasi absen terpilih ("Absen Dimana") + daftar lokasi.
+  const [selectedLocation, setSelectedLocation] = useState<LocationChoice | null>(null);
+  const [locations, setLocations] = useState<AbsenLocation[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [pickerVisible, setPickerVisible] = useState(false);
+
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -58,6 +75,44 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
   const isCheckIn = type === 'check_in';
   const title = isCheckIn ? 'Absen Masuk' : 'Absen Keluar';
   const now = new Date();
+
+  // Foto WAJIB kalau lokasi type='field' (dinas lapangan). Kalau office/client,
+  // foto opsional — backend tetap bisa menolak kalau di luar radius (pesan
+  // error server ditampilkan apa adanya). Tanpa pilihan lokasi: pertahankan
+  // perilaku lama (foto wajib) karena radius tidak diketahui.
+  const photoRequired = selectedLocation ? selectedLocation.type === 'field' : true;
+
+  // Muat lokasi terpilih (dari params Home / default tersimpan) + daftar lokasi.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let choice: LocationChoice | null = null;
+      if (initialLocationId) {
+        choice = {
+          id: initialLocationId,
+          name: initialLocationName ?? '',
+          type: (initialLocationType as AbsenLocation['type'] | undefined) ?? undefined,
+        };
+      } else {
+        choice = await getSavedAbsenLocation();
+      }
+      if (cancelled) return;
+      setSelectedLocation(choice);
+
+      setLocationsLoading(true);
+      try {
+        const res = await locationApi.list();
+        if (!cancelled) setLocations(res.locations);
+      } catch {
+        // /locations belum tersedia — alur tetap jalan tanpa daftar lokasi
+      } finally {
+        if (!cancelled) setLocationsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialLocationId, initialLocationName, initialLocationType]);
 
   // Ambil lokasi + reverse geocode saat screen terbuka.
   useEffect(() => {
@@ -125,8 +180,24 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
     setStep('scan');
   };
 
+  // Foto opsional (office/client): lanjut ke konfirmasi tanpa foto.
+  const skipPhoto = () => {
+    setError('');
+    setStep('confirm');
+  };
+
+  const onPickLocation = async (choice: LocationChoice | null) => {
+    setPickerVisible(false);
+    setSelectedLocation(choice);
+    if (choice) {
+      await saveAbsenLocation(choice);
+    } else {
+      await clearAbsenLocation();
+    }
+  };
+
   async function submit() {
-    if (!photoUri) {
+    if (photoRequired && !photoUri) {
       setError('Foto wajib diambil untuk absen');
       return;
     }
@@ -135,11 +206,14 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
     try {
       const form = new FormData();
       form.append('type', type);
-      form.append('photo', {
-        uri: photoUri,
-        name: `absen-${Date.now()}.jpg`,
-        type: 'image/jpeg',
-      } as unknown as Blob);
+      if (photoUri) {
+        form.append('photo', {
+          uri: photoUri,
+          name: `absen-${Date.now()}.jpg`,
+          type: 'image/jpeg',
+        } as unknown as Blob);
+      }
+      if (selectedLocation) form.append('location_id', selectedLocation.id);
       if (coords) {
         form.append('lat', String(coords.lat));
         form.append('lng', String(coords.lng));
@@ -228,7 +302,14 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
               </Pressable>
             </View>
 
-            <Text style={styles.hint}>Posisikan wajah di dalam bingkai</Text>
+            {photoRequired ? (
+              <Text style={styles.hint}>Posisikan wajah di dalam bingkai</Text>
+            ) : (
+              <Pressable style={styles.skipPhotoBtn} onPress={skipPhoto}>
+                <Ionicons name="arrow-forward" size={15} color="#FFFFFF" />
+                <Text style={styles.skipPhotoText}>Lanjut Tanpa Foto</Text>
+              </Pressable>
+            )}
             <Pressable style={styles.galleryLink} onPress={pickFromGallery}>
               <Ionicons name="images-outline" size={16} color="rgba(255,255,255,0.9)" />
               <Text style={styles.galleryText}>Pilih dari galeri</Text>
@@ -270,6 +351,46 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
               <Text style={styles.editBtnText}>Galeri</Text>
             </Pressable>
           </View>
+          {!photoRequired && !photoUri ? (
+            <Text style={styles.photoHint}>
+              Foto opsional untuk lokasi ini — bisa langsung kirim tanpa foto.
+            </Text>
+          ) : null}
+        </View>
+
+        {/* Lokasi absen terpilih ("Absen Dimana") */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Absen Dimana</Text>
+            <Pressable style={styles.changeLocBtn} onPress={() => setPickerVisible(true)} hitSlop={8}>
+              <Ionicons name="swap-horizontal" size={14} color={colors.primary} />
+              <Text style={styles.changeLocText}>Ganti</Text>
+            </Pressable>
+          </View>
+          {selectedLocation ? (
+            <View style={styles.locRow}>
+              <View style={styles.locIcon}>
+                <Ionicons
+                  name={LOCATION_TYPE_ICON[selectedLocation.type ?? 'office']}
+                  size={18}
+                  color={colors.primary}
+                />
+              </View>
+              <View style={styles.locInfo}>
+                <Text style={styles.locName}>{selectedLocation.name}</Text>
+                <Text style={styles.locType}>
+                  {selectedLocation.type ? LOCATION_TYPE_LABEL[selectedLocation.type] : 'Lokasi'}
+                </Text>
+              </View>
+              {photoRequired ? (
+                <View style={styles.photoReqBadge}>
+                  <Text style={styles.photoReqText}>Foto wajib</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <Text style={styles.muted}>Tidak dipilih — absen tanpa pilihan lokasi.</Text>
+          )}
         </View>
 
         {/* Lokasi */}
@@ -354,6 +475,15 @@ export function AbsenFlow({ type }: AbsenFlowProps) {
 
         <Button title="Kirim Absen" onPress={submit} loading={submitting} />
       </ScrollView>
+
+      <LocationPicker
+        visible={pickerVisible}
+        locations={locations}
+        loading={locationsLoading}
+        selectedId={selectedLocation?.id ?? null}
+        onSelect={onPickLocation}
+        onClose={() => setPickerVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -456,6 +586,23 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     overflow: 'hidden',
   },
+  skipPhotoBtn: {
+    position: 'absolute',
+    bottom: 130,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    borderRadius: 999,
+    shadowColor: colors.primaryDark,
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  skipPhotoText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   galleryLink: {
     position: 'absolute',
     bottom: 20,
@@ -489,6 +636,28 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   editBtnText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  photoHint: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
+  changeLocBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: 4 },
+  changeLocText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  locRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
+  locIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locInfo: { flex: 1 },
+  locName: { fontSize: 15, fontWeight: '700', color: colors.text },
+  locType: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
+  photoReqBadge: {
+    backgroundColor: colors.dangerSoft,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  photoReqText: { color: colors.danger, fontSize: 11, fontWeight: '700' },
   card: {
     backgroundColor: colors.card,
     borderRadius: 16,

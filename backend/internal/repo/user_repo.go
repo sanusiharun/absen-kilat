@@ -27,6 +27,14 @@ type userDAO struct {
 	NotificationEnabled int
 	Role                string
 	IsActive            int
+	NIP                 string
+	Phone               string
+	Department          string
+	Position            string
+	Address             string
+	JoinDate            string
+	ManagerID           sql.NullString
+	EmployeeCode        string
 	CreatedAt           string
 	UpdatedAt           string
 }
@@ -42,7 +50,9 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 }
 
 const userCols = `id, email, password_hash, name, avatar_path,
-	is_email_verified, notification_enabled, role, is_active, created_at, updated_at`
+	is_email_verified, notification_enabled, role, is_active,
+	nip, phone, department, position, address, join_date, manager_id, employee_code,
+	created_at, updated_at`
 
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	if u.ID == "" {
@@ -60,16 +70,20 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO users (id, email, password_hash, name, avatar_path,
-			is_email_verified, notification_enabled, role, is_active, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			is_email_verified, notification_enabled, role, is_active,
+			nip, phone, department, position, address, join_date, manager_id, employee_code,
+			created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.ID, u.Email, u.PasswordHash, u.Name, u.AvatarPath,
 		boolToInt(u.IsEmailVerified), boolToInt(u.NotificationEnabled),
 		string(u.Role), boolToInt(u.IsActive),
+		u.NIP, u.Phone, u.Department, u.Position, u.Address, u.JoinDate,
+		nullString(u.ManagerID), u.EmployeeCode,
 		formatTime(u.CreatedAt), formatTime(u.UpdatedAt),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return pkgerrors.Conflict("user", "email", u.Email)
+			return r.conflictFor(err, u)
 		}
 		return fmt.Errorf("repo.UserRepository.Create: %w", err)
 	}
@@ -93,14 +107,21 @@ func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE users SET password_hash = ?, name = ?, avatar_path = ?,
 			is_email_verified = ?, notification_enabled = ?, role = ?, is_active = ?,
+			nip = ?, phone = ?, department = ?, position = ?, address = ?,
+			join_date = ?, manager_id = ?, employee_code = ?,
 			updated_at = ?
 		WHERE id = ?`,
 		u.PasswordHash, u.Name, u.AvatarPath,
 		boolToInt(u.IsEmailVerified), boolToInt(u.NotificationEnabled),
 		string(u.Role), boolToInt(u.IsActive),
+		u.NIP, u.Phone, u.Department, u.Position, u.Address, u.JoinDate,
+		nullString(u.ManagerID), u.EmployeeCode,
 		formatTime(u.UpdatedAt), u.ID,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return r.conflictFor(err, u)
+		}
 		return fmt.Errorf("repo.UserRepository.Update: %w", err)
 	}
 	n, err := res.RowsAffected()
@@ -111,6 +132,18 @@ func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 		return pkgerrors.NotFound("user", u.ID)
 	}
 	return nil
+}
+
+// conflictFor maps a unique-constraint violation to the right conflict error:
+// an existing email wins over an existing employee_code.
+func (r *UserRepository) conflictFor(err error, u *domain.User) error {
+	if _, ferr := r.FindByEmail(context.Background(), u.Email); ferr == nil {
+		return pkgerrors.Conflict("user", "email", u.Email)
+	}
+	if u.EmployeeCode != "" {
+		return pkgerrors.Conflict("user", "employee_code", u.EmployeeCode)
+	}
+	return pkgerrors.Conflict("user", "email", u.Email)
 }
 
 // CountActive returns the number of active (non-disabled) accounts.
@@ -137,9 +170,9 @@ func (r *UserRepository) ListFiltered(ctx context.Context, search, status string
 	var conds []string
 	var args []any
 	if search != "" {
-		conds = append(conds, `(name LIKE ? COLLATE NOCASE OR email LIKE ? COLLATE NOCASE)`)
+		conds = append(conds, `(name LIKE ? COLLATE NOCASE OR email LIKE ? COLLATE NOCASE OR employee_code LIKE ? COLLATE NOCASE)`)
 		like := "%" + search + "%"
-		args = append(args, like, like)
+		args = append(args, like, like, like)
 	}
 	switch status {
 	case "active":
@@ -163,22 +196,12 @@ func (r *UserRepository) ListFiltered(ctx context.Context, search, status string
 		var d userDAO
 		if err := rows.Scan(&d.ID, &d.Email, &d.PasswordHash, &d.Name, &d.AvatarPath,
 			&d.IsEmailVerified, &d.NotificationEnabled, &d.Role, &d.IsActive,
+			&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
+			&d.ManagerID, &d.EmployeeCode,
 			&d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("repo.UserRepository.ListFiltered: scan: %w", err)
 		}
-		out = append(out, domain.User{
-			ID:                  d.ID,
-			Email:               d.Email,
-			PasswordHash:        d.PasswordHash,
-			Name:                d.Name,
-			AvatarPath:          d.AvatarPath,
-			IsEmailVerified:     d.IsEmailVerified == 1,
-			NotificationEnabled: d.NotificationEnabled == 1,
-			Role:                domain.UserRole(d.Role),
-			IsActive:            d.IsActive == 1,
-			CreatedAt:           parseTime(d.CreatedAt),
-			UpdatedAt:           parseTime(d.UpdatedAt),
-		})
+		out = append(out, userFromDAO(d))
 	}
 	return out, rows.Err()
 }
@@ -188,6 +211,8 @@ func scanUser(row *sql.Row) (*domain.User, error) {
 	var d userDAO
 	err := row.Scan(&d.ID, &d.Email, &d.PasswordHash, &d.Name, &d.AvatarPath,
 		&d.IsEmailVerified, &d.NotificationEnabled, &d.Role, &d.IsActive,
+		&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
+		&d.ManagerID, &d.EmployeeCode,
 		&d.CreatedAt, &d.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -195,7 +220,13 @@ func scanUser(row *sql.Row) (*domain.User, error) {
 		}
 		return nil, fmt.Errorf("repo.scanUser: %w", err)
 	}
-	return &domain.User{
+	u := userFromDAO(d)
+	return &u, nil
+}
+
+// userFromDAO maps a scanned DAO row to a domain.User.
+func userFromDAO(d userDAO) domain.User {
+	u := domain.User{
 		ID:                  d.ID,
 		Email:               d.Email,
 		PasswordHash:        d.PasswordHash,
@@ -205,7 +236,18 @@ func scanUser(row *sql.Row) (*domain.User, error) {
 		NotificationEnabled: d.NotificationEnabled == 1,
 		Role:                domain.UserRole(d.Role),
 		IsActive:            d.IsActive == 1,
+		NIP:                 d.NIP,
+		Phone:               d.Phone,
+		Department:          d.Department,
+		Position:            d.Position,
+		Address:             d.Address,
+		JoinDate:            d.JoinDate,
+		EmployeeCode:        d.EmployeeCode,
 		CreatedAt:           parseTime(d.CreatedAt),
 		UpdatedAt:           parseTime(d.UpdatedAt),
-	}, nil
+	}
+	if d.ManagerID.Valid {
+		u.ManagerID = d.ManagerID.String
+	}
+	return u
 }

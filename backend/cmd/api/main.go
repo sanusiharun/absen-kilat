@@ -52,16 +52,20 @@ func main() {
 	// Wire repositories and services.
 	userRepo := repo.NewUserRepository(pool)
 	attendanceRepo := repo.NewAttendanceRepository(pool)
+	locationRepo := repo.NewLocationRepository(pool)
+	settingsRepo := repo.NewSettingsRepository(pool)
 	notificationRepo := repo.NewNotificationRepository(gdb)
+	settingsSvc := service.NewSettingsService(settingsRepo)
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
-	attendanceSvc := service.NewAttendanceService(attendanceRepo, cfg.CutoffHour, service.OfficeConfig{
+	attendanceSvc := service.NewAttendanceService(attendanceRepo, locationRepo, settingsSvc, cfg.CutoffHour, service.OfficeConfig{
 		Lat:     cfg.OfficeLat,
 		Lng:     cfg.OfficeLng,
 		RadiusM: cfg.AbsenRadiusM,
 	})
 	profileSvc := service.NewProfileService(userRepo)
 	notificationSvc := service.NewNotificationService(notificationRepo)
-	adminSvc := service.NewAdminService(userRepo, attendanceRepo, cfg.AdminEmail)
+	adminSvc := service.NewAdminService(userRepo, attendanceRepo, locationRepo, settingsSvc, cfg.AdminEmail)
+	appSvc := service.NewAppService(settingsSvc, locationRepo)
 	geocodeSvc := service.NewGeocodeService()
 
 	// Seed the initial admin account when configured.
@@ -81,6 +85,7 @@ func main() {
 	profileHandler := transport.NewProfileHandler(profileSvc, photoStore, authSvc)
 	notificationHandler := transport.NewNotificationHandler(notificationSvc)
 	adminHandler := transport.NewAdminHandler(adminSvc)
+	appInfoHandler := transport.NewAppInfoHandler(appSvc)
 	geocodeHandler := transport.NewGeocodeHandler(geocodeSvc)
 
 	r := chi.NewRouter()
@@ -114,6 +119,7 @@ func main() {
 			profileHandler.RegisterRoutes(r)
 			notificationHandler.RegisterRoutes(r)
 			geocodeHandler.RegisterRoutes(r)
+			appInfoHandler.RegisterRoutes(r)
 
 			// Admin-only routes: auth + role check.
 			r.Group(func(r chi.Router) {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sanusi/absen-kilat/backend/internal/domain"
+	pkgerrors "github.com/sanusi/absen-kilat/backend/pkg/errors"
 )
 
 // fakeAttendanceRepo is an in-memory domain.AttendanceRepository.
@@ -47,7 +48,7 @@ func (f *fakeAttendanceRepo) FindByID(_ context.Context, id string) (*domain.Att
 
 func TestCheckInAndCheckOutFlow(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{}) // cutoff 09:00
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, nil, nil, 9, OfficeConfig{}) // cutoff 09:00
 	loc := time.FixedZone("WIB", 7*3600)
 	now := time.Date(2026, 8, 14, 8, 30, 0, 0, loc) // 08:30 → on time
 
@@ -82,7 +83,7 @@ func TestCheckInAndCheckOutFlow(t *testing.T) {
 
 func TestCheckOutWithoutCheckInFails(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{})
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, nil, nil, 9, OfficeConfig{})
 	loc := time.FixedZone("WIB", 7*3600)
 	now := time.Date(2026, 8, 14, 17, 0, 0, 0, loc)
 
@@ -94,7 +95,7 @@ func TestCheckOutWithoutCheckInFails(t *testing.T) {
 
 func TestLateStatus(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{}) // cutoff 09:00
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, nil, nil, 9, OfficeConfig{}) // cutoff 09:00
 	loc := time.FixedZone("WIB", 7*3600)
 
 	late := time.Date(2026, 8, 14, 9, 30, 0, 0, loc) // 09:30 → late
@@ -109,7 +110,7 @@ func TestLateStatus(t *testing.T) {
 
 func TestTodayState(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{})
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, nil, nil, 9, OfficeConfig{})
 	loc := time.FixedZone("WIB", 7*3600)
 	now := time.Date(2026, 8, 14, 8, 0, 0, 0, loc)
 
@@ -136,42 +137,63 @@ func TestTodayState(t *testing.T) {
 
 func TestGeofence(t *testing.T) {
 	ctx := context.Background()
-	// Office at (0,0) with 1000 m radius.
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{Lat: 0, Lng: 0, RadiusM: 1000})
+	// Office at (0,0) with 1000 m radius, using the legacy OfficeConfig
+	// fallback (no locations table entries).
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, nil, nil, 9, OfficeConfig{Lat: 0, Lng: 0, RadiusM: 1000})
 	loc := time.FixedZone("WIB", 7*3600)
 	now := time.Date(2026, 8, 14, 8, 0, 0, 0, loc)
 
-	// ~110 km away -> must be rejected.
+	// ~110 km away → NO LONGER rejected: with a photo it is accepted but
+	// lands in approval_status='pending'.
 	lat, lng := 1.0, 0.0
-	_, err := svc.CheckIn(ctx, AttendanceInput{
+	att, err := svc.CheckIn(ctx, AttendanceInput{
 		UserID: "u-g1", Type: domain.AttendanceCheckIn, Now: now, Location: loc,
-		Latitude: &lat, Longitude: &lng,
+		Latitude: &lat, Longitude: &lng, PhotoPath: "uploads/outside.jpg",
 	})
-	if err == nil {
-		t.Fatal("check-in far outside radius should be rejected")
+	if err != nil {
+		t.Fatalf("check-in far outside radius should be accepted: %v", err)
+	}
+	if att.ApprovalStatus != domain.ApprovalPending {
+		t.Fatalf("approval = %q, want pending", att.ApprovalStatus)
+	}
+	if att.DistanceM == nil || *att.DistanceM <= 1000 {
+		t.Fatalf("distance = %v, want > 1000m", att.DistanceM)
 	}
 
-	// At the office -> accepted and distance recorded (~0 m).
+	// Far outside WITHOUT a photo → photo is mandatory → validation error.
+	lat3, lng3 := 1.0, 0.5
+	_, err = svc.CheckIn(ctx, AttendanceInput{
+		UserID: "u-g4", Type: domain.AttendanceCheckIn, Now: now, Location: loc,
+		Latitude: &lat3, Longitude: &lng3,
+	})
+	if err == nil || !pkgerrors.IsValidation(err) {
+		t.Fatalf("outside without photo should fail validation, got %v", err)
+	}
+
+	// At the office + photo → auto-approved, distance recorded (~0 m).
 	lat2, lng2 := 0.0001, 0.0001
-	att, err := svc.CheckIn(ctx, AttendanceInput{
+	att2, err := svc.CheckIn(ctx, AttendanceInput{
 		UserID: "u-g2", Type: domain.AttendanceCheckIn, Now: now, Location: loc,
-		Latitude: &lat2, Longitude: &lng2,
+		Latitude: &lat2, Longitude: &lng2, PhotoPath: "uploads/inside.jpg",
 	})
 	if err != nil {
 		t.Fatalf("check-in inside radius should pass: %v", err)
 	}
-	if att.DistanceM == nil {
+	if att2.DistanceM == nil {
 		t.Fatal("distance should be recorded")
 	}
+	if att2.ApprovalStatus != domain.ApprovalApproved {
+		t.Fatalf("approval = %q, want approved", att2.ApprovalStatus)
+	}
 
-	// No coordinates -> geofence skipped, no error.
-	att2, err := svc.CheckIn(ctx, AttendanceInput{
+	// No coordinates → geofence skipped, no error, no distance.
+	att3, err := svc.CheckIn(ctx, AttendanceInput{
 		UserID: "u-g3", Type: domain.AttendanceCheckIn, Now: now, Location: loc,
 	})
 	if err != nil {
 		t.Fatalf("check-in without coords should pass: %v", err)
 	}
-	if att2.DistanceM != nil {
+	if att3.DistanceM != nil {
 		t.Fatal("distance should be nil when no coordinates")
 	}
 }

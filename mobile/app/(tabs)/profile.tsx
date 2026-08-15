@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { profileApi } from '@/src/api/endpoints';
 import { clearTokens } from '@/src/api/tokenStorage';
@@ -41,9 +42,11 @@ export default function ProfileScreen() {
 
   if (loading || !profile) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -122,7 +125,8 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Header indigo */}
       <View style={styles.header}>
         <View style={styles.headerDeco1} />
@@ -233,7 +237,8 @@ export default function ProfileScreen() {
         <Text style={styles.logoutText}>Keluar</Text>
       </Pressable>
       <Text style={styles.version}>Absen Kilat v1.0.0</Text>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -262,6 +267,7 @@ function MenuDivider() {
 }
 
 const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.primary },
   container: { flex: 1, backgroundColor: colors.bg },
   content: { paddingBottom: spacing.xl },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },

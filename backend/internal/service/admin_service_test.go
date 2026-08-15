@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,6 +17,13 @@ import (
 
 // newAdminTestEnv wires real repos against a throwaway DB (migrations applied).
 func newAdminTestEnv(t *testing.T) (*AdminService, *repo.UserRepository, *repo.AttendanceRepository) {
+	svc, ur, ar, _ := newAdminTestEnvFull(t)
+	return svc, ur, ar
+}
+
+// newAdminTestEnvFull is newAdminTestEnv plus the raw pool (for asserting on
+// audit rows directly).
+func newAdminTestEnvFull(t *testing.T) (*AdminService, *repo.UserRepository, *repo.AttendanceRepository, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")
 	pool, err := db.Open(context.Background(), path)
@@ -25,8 +33,11 @@ func newAdminTestEnv(t *testing.T) (*AdminService, *repo.UserRepository, *repo.A
 	t.Cleanup(func() { pool.Close() })
 	ur := repo.NewUserRepository(pool)
 	ar := repo.NewAttendanceRepository(pool)
-	svc := NewAdminService(ur, ar, "admin@test.dev")
-	return svc, ur, ar
+	lr := repo.NewLocationRepository(pool)
+	sr := repo.NewSettingsRepository(pool)
+	ss := NewSettingsService(sr)
+	svc := NewAdminService(ur, ar, lr, ss, "admin@test.dev")
+	return svc, ur, ar, pool
 }
 
 func addUser(t *testing.T, r *repo.UserRepository, email string, role domain.UserRole) *domain.User {
@@ -335,7 +346,7 @@ func TestAdminService_CreateUser(t *testing.T) {
 	ctx := context.Background()
 	svc, ur, _ := newAdminTestEnv(t)
 
-	u, err := svc.CreateUser(ctx, "new@test.dev", "secret123", "New User", domain.RoleEmployee)
+	u, err := svc.CreateUser(ctx, CreateUserInput{Email: "new@test.dev", Password: "secret123", Name: "New User", Role: domain.RoleEmployee})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -350,17 +361,17 @@ func TestAdminService_CreateUser(t *testing.T) {
 	}
 
 	// Duplicate email → conflict.
-	if _, err := svc.CreateUser(ctx, "new@test.dev", "secret123", "Again", domain.RoleEmployee); !pkgerrors.IsConflict(err) {
+	if _, err := svc.CreateUser(ctx, CreateUserInput{Email: "new@test.dev", Password: "secret123", Name: "Again", Role: domain.RoleEmployee}); !pkgerrors.IsConflict(err) {
 		t.Fatalf("duplicate email: want conflict, got %v", err)
 	}
 
 	// Invalid inputs → validation.
-	if _, err := svc.CreateUser(ctx, "bad", "short", "", domain.RoleEmployee); !pkgerrors.IsValidation(err) {
+	if _, err := svc.CreateUser(ctx, CreateUserInput{Email: "bad", Password: "short", Name: "", Role: domain.RoleEmployee}); !pkgerrors.IsValidation(err) {
 		t.Fatalf("bad input: want validation, got %v", err)
 	}
 
 	// Empty role defaults to employee.
-	u2, err := svc.CreateUser(ctx, "emp@test.dev", "secret123", "Emp", "")
+	u2, err := svc.CreateUser(ctx, CreateUserInput{Email: "emp@test.dev", Password: "secret123", Name: "Emp"})
 	if err != nil {
 		t.Fatalf("CreateUser default role: %v", err)
 	}
@@ -369,12 +380,24 @@ func TestAdminService_CreateUser(t *testing.T) {
 	}
 
 	// Admin role is allowed.
-	u3, err := svc.CreateUser(ctx, "boss@test.dev", "secret123", "Boss", domain.RoleAdmin)
+	u3, err := svc.CreateUser(ctx, CreateUserInput{Email: "boss@test.dev", Password: "secret123", Name: "Boss", Role: domain.RoleAdmin})
 	if err != nil {
 		t.Fatalf("CreateUser admin: %v", err)
 	}
 	if u3.Role != domain.RoleAdmin {
 		t.Fatalf("role = %q, want admin", u3.Role)
+	}
+
+	// Employee code: accepted, and duplicates are rejected.
+	u4, err := svc.CreateUser(ctx, CreateUserInput{Email: "code@test.dev", Password: "secret123", Name: "Code", EmployeeCode: "EMP-001"})
+	if err != nil {
+		t.Fatalf("CreateUser with employee_code: %v", err)
+	}
+	if u4.EmployeeCode != "EMP-001" {
+		t.Fatalf("employee_code = %q, want EMP-001", u4.EmployeeCode)
+	}
+	if _, err := svc.CreateUser(ctx, CreateUserInput{Email: "code2@test.dev", Password: "secret123", Name: "Code2", EmployeeCode: "EMP-001"}); !pkgerrors.IsConflict(err) {
+		t.Fatalf("duplicate employee_code: want conflict, got %v", err)
 	}
 }
 
