@@ -31,12 +31,36 @@ const NAV_UTAMA: NavItem[] = [
   { label: "Laporan", href: "/laporan", icon: "chart-bar" },
   { label: "Lokasi", href: "/lokasi", icon: "map-pin" },
   { label: "Device", href: "/device", icon: "device" },
+  { label: "Approval", href: "/approval", icon: "check-list" },
 ];
 
 const NAV_PENGATURAN: NavItem[] = [
   { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
   { label: "Akun Admin", href: "/akun-admin", icon: "user" },
 ];
+
+// Role -> menu yang boleh dilihat. Role tak dikenal / employee => akses ditolak.
+const ROLE_KEY = "absenkilat_role";
+const ADMIN_ROLES = ["super_admin", "hr", "supervisor"];
+
+function navForRole(role: string | null): NavItem[] {
+  switch (role) {
+    case "super_admin":
+      return [...NAV_UTAMA, ...NAV_PENGATURAN];
+    case "hr":
+      return NAV_UTAMA; // semua kecuali Pengaturan
+    case "supervisor":
+      return [
+        { label: "Dashboard", href: "/dashboard", icon: "dashboard" },
+        { label: "Approval", href: "/approval", icon: "check-list" },
+        { label: "Absensi", href: "/absensi", icon: "calendar-check" },
+        { label: "Laporan", href: "/laporan", icon: "chart-bar" },
+      ];
+    default:
+      // role belum termuat / employee / tak dikenal
+      return NAV_UTAMA; // default super_admin (flash acceptable), dicek lagi setelah /me
+  }
+}
 
 export default function AdminShell({
   title,
@@ -53,6 +77,10 @@ export default function AdminShell({
   const router = useRouter();
   const { theme, toggle } = useTheme();
   const [me, setMe] = useState<Me | null>(null);
+  const [role, setRole] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return window.localStorage.getItem(ROLE_KEY);
+  });
 
   const loadMe = useCallback(async () => {
     if (!getToken()) {
@@ -60,7 +88,12 @@ export default function AdminShell({
       return;
     }
     try {
-      setMe(await api<Me>("/me"));
+      const data = await api<Me>("/me");
+      setMe(data);
+      setRole(data.role);
+      try {
+        window.localStorage.setItem(ROLE_KEY, data.role);
+      } catch {}
     } catch (err) {
       if (err instanceof Error && /401|403/.test(err.message)) {
         clearToken();
@@ -77,8 +110,15 @@ export default function AdminShell({
 
   const logout = () => {
     clearToken();
+    try {
+      window.localStorage.removeItem(ROLE_KEY);
+    } catch {}
     router.replace("/login");
   };
+
+  // Akses ditolak jika role sudah termuat dan bukan admin (employee / tak dikenal).
+  const denied = role !== null && !ADMIN_ROLES.includes(role);
+  const navItems = denied ? [] : navForRole(role);
 
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === href : pathname.startsWith(href);
@@ -132,12 +172,16 @@ export default function AdminShell({
           <div className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
             Menu Utama
           </div>
-          {NAV_UTAMA.map(navLink)}
+          {navItems.map(navLink)}
 
-          <div className="mb-1.5 mt-5 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-            Pengaturan
-          </div>
-          {NAV_PENGATURAN.map(navLink)}
+          {!denied && role === "super_admin" && (
+            <>
+              <div className="mb-1.5 mt-5 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                Pengaturan
+              </div>
+              {NAV_PENGATURAN.map(navLink)}
+            </>
+          )}
         </nav>
 
         {/* Admin profile */}
@@ -196,7 +240,30 @@ export default function AdminShell({
           </div>
         </header>
 
-        <main className="p-4 md:p-8">{children}</main>
+        <main className="p-4 md:p-8">
+          {denied ? (
+            <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl bg-white px-6 py-14 text-center shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400">
+                <Icon name="lock" className="h-8 w-8" />
+              </div>
+              <h2 className="mt-5 text-xl font-bold text-slate-900 dark:text-slate-100">Akses Ditolak</h2>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Akun Anda tidak memiliki izin untuk mengakses dashboard admin. Silakan hubungi administrator jika
+                menurut Anda ini sebuah kesalahan.
+              </p>
+              <button
+                type="button"
+                onClick={logout}
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700"
+              >
+                <Icon name="logout" className="h-4 w-4" />
+                Keluar
+              </button>
+            </div>
+          ) : (
+            children
+          )}
+        </main>
       </div>
     </div>
   );

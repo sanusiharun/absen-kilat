@@ -389,6 +389,116 @@ func (r *AttendanceRepository) ListDevices(ctx context.Context) ([]domain.Device
 	return out, rows.Err()
 }
 
+// AttendanceApprovalFilter bounds the approval queue listing. Status is an
+// optional equality filter on approval_status; ManagerID, when non-nil,
+// scopes the listing to records owned by users whose manager_id matches
+// (supervisor team scoping). Limit is clamped to [1, 500] and Offset to >= 0
+// by the queries.
+type AttendanceApprovalFilter struct {
+	Status    string
+	ManagerID *string
+	Limit     int
+	Offset    int
+}
+
+// ListForApproval returns attendance rows (joined with the owner's name and
+// email) matching the filter, newest first.
+func (r *AttendanceRepository) ListForApproval(ctx context.Context, f AttendanceApprovalFilter) ([]AdminAttendanceRow, error) {
+	where, args := approvalWhere(f)
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT a.id, a.user_id, u.name, u.email, a.type, a.status, a.photo_path,
+			a.address, a.latitude, a.longitude, a.device, a.ip_address, a.distance_m,
+			a.source, a.approval_status, a.approved_by, a.approved_at,
+			a.rejection_reason, a.location_id, a.occurred_at
+		FROM attendances a
+		JOIN users u ON u.id = a.user_id`+where+`
+		ORDER BY a.occurred_at DESC
+		LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+	if err != nil {
+		return nil, fmt.Errorf("repo.AttendanceRepository.ListForApproval: %w", err)
+	}
+	defer rows.Close()
+
+	var out []AdminAttendanceRow
+	for rows.Next() {
+		var d AdminAttendanceRow
+		if err := rows.Scan(&d.ID, &d.UserID, &d.UserName, &d.UserEmail, &d.Type, &d.Status,
+			&d.PhotoPath, &d.Address, &d.Latitude, &d.Longitude, &d.Device, &d.IPAddress,
+			&d.DistanceM, &d.Source, &d.ApprovalStatus, &d.ApprovedBy, &d.ApprovedAt,
+			&d.RejectionReason, &d.LocationID, &d.OccurredAt); err != nil {
+			return nil, fmt.Errorf("repo.AttendanceRepository.ListForApproval: scan: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo.AttendanceRepository.ListForApproval: rows: %w", err)
+	}
+	return out, nil
+}
+
+// CountApproval returns the number of rows matching the filter (before
+// limit/offset).
+func (r *AttendanceRepository) CountApproval(ctx context.Context, f AttendanceApprovalFilter) (int, error) {
+	where, args := approvalWhere(f)
+	var total int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM attendances a JOIN users u ON u.id = a.user_id`+where,
+		args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("repo.AttendanceRepository.CountApproval: %w", err)
+	}
+	return total, nil
+}
+
+// approvalWhere builds the WHERE clause and args for the approval listing.
+func approvalWhere(f AttendanceApprovalFilter) (string, []any) {
+	conds := []string{"1=1"}
+	var args []any
+	if f.Status != "" {
+		conds = append(conds, "a.approval_status = ?")
+		args = append(args, f.Status)
+	}
+	if f.ManagerID != nil && *f.ManagerID != "" {
+		conds = append(conds, "u.manager_id = ?")
+		args = append(args, *f.ManagerID)
+	}
+	return " WHERE " + strings.Join(conds, " AND "), args
+}
+
+// UpdateApprovalStatus updates only the approval columns of an attendance
+// record (approval_status, approved_by, approved_at, rejection_reason).
+// The type/status/occurred_at columns are left untouched.
+func (r *AttendanceRepository) UpdateApprovalStatus(ctx context.Context, id string, status domain.ApprovalStatus, approvedBy string, approvedAt time.Time, rejectionReason string) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE attendances SET approval_status = ?, approved_by = ?,
+			approved_at = ?, rejection_reason = ?
+		WHERE id = ?`,
+		string(status), nullString(approvedBy), formatTime(approvedAt),
+		rejectionReason, id)
+	if err != nil {
+		return fmt.Errorf("repo.AttendanceRepository.UpdateApprovalStatus: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("repo.AttendanceRepository.UpdateApprovalStatus: rows: %w", err)
+	}
+	if n == 0 {
+		return pkgerrors.NotFound("attendance", id)
+	}
+	return nil
+}
+
 // scanAttendance scans a single row into a domain.Attendance.
 func scanAttendance(row interface{ Scan(...any) error }) (*domain.Attendance, error) {
 	var d attendanceDAO

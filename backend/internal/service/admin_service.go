@@ -50,7 +50,7 @@ func (s *AdminService) SeedAdmin(ctx context.Context, password string) error {
 		Email:               s.adminEmail,
 		PasswordHash:        string(hash),
 		Name:                "Admin",
-		Role:                domain.RoleAdmin,
+		Role:                domain.RoleSuperAdmin,
 		IsActive:            true,
 		IsEmailVerified:     true,
 		NotificationEnabled: true,
@@ -124,7 +124,7 @@ func (s *AdminService) UpdateUser(ctx context.Context, targetID, actorID string,
 		if up.IsActive != nil && !*up.IsActive {
 			return nil, pkgerrors.Forbidden("you cannot deactivate your own account")
 		}
-		if up.Role != nil && *up.Role != domain.RoleAdmin && u.Role == domain.RoleAdmin {
+		if up.Role != nil && isAdminRole(u.Role) && !isAdminRole(*up.Role) {
 			return nil, pkgerrors.Forbidden("you cannot revoke your own admin role")
 		}
 	}
@@ -393,8 +393,8 @@ func (s *AdminService) CreateUser(ctx context.Context, in CreateUserInput) (*dom
 	if in.Name == "" {
 		fields["name"] = "is required"
 	}
-	if in.Role != "" && in.Role != domain.RoleAdmin && in.Role != domain.RoleEmployee {
-		fields["role"] = "must be admin or employee"
+	if in.Role != "" && !validUserRole(in.Role) {
+		fields["role"] = "must be super_admin, hr, supervisor, or employee"
 	}
 	if len(fields) > 0 {
 		return nil, pkgerrors.ValidationMulti(fields)
@@ -436,6 +436,142 @@ func parseRFC3339Nano(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// isAdminRole reports whether the role has full admin-dashboard privileges
+// (used to guard against an admin revoking their own access).
+func isAdminRole(r domain.UserRole) bool {
+	return r == domain.RoleSuperAdmin || r == domain.RoleHR
+}
+
+// validUserRole reports whether r is one of the four accepted roles.
+func validUserRole(r domain.UserRole) bool {
+	switch r {
+	case domain.RoleSuperAdmin, domain.RoleHR, domain.RoleSupervisor, domain.RoleEmployee:
+		return true
+	}
+	return false
+}
+
+// ===== Approval queue (issue #17) =====
+
+// Team returns the direct reports (users with manager_id == managerID),
+// ordered by name.
+func (s *AdminService) Team(ctx context.Context, managerID string) ([]domain.User, error) {
+	return s.users.ListByManager(ctx, managerID)
+}
+
+// ApprovalItem is one row of the approval queue: an attendance record
+// joined with the name/email of the user who recorded it.
+type ApprovalItem struct {
+	ID             string
+	UserID         string
+	UserName       string
+	UserEmail      string
+	Type           domain.AttendanceType
+	Status         domain.AttendanceStatus
+	PhotoURL       string
+	Address        string
+	Source         domain.AttendanceSource
+	ApprovalStatus domain.ApprovalStatus
+	LocationID     string
+	OccurredAt     time.Time
+}
+
+// Approvals lists the approval queue. A supervisor only sees records of
+// their own team (users with manager_id == actorID); super_admin/hr see
+// everything. Status filters on approval_status ("" = all).
+func (s *AdminService) Approvals(ctx context.Context, actorRole domain.UserRole, actorID, status string, limit, offset int) ([]ApprovalItem, int, error) {
+	f := repo.AttendanceApprovalFilter{Status: status, Limit: limit, Offset: offset}
+	if actorRole == domain.RoleSupervisor {
+		f.ManagerID = &actorID
+	}
+	total, err := s.attendances.CountApproval(ctx, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.attendances.ListForApproval(ctx, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]ApprovalItem, 0, len(rows))
+	for _, r := range rows {
+		item := ApprovalItem{
+			ID:             r.ID,
+			UserID:         r.UserID,
+			UserName:       r.UserName,
+			UserEmail:      r.UserEmail,
+			Type:           domain.AttendanceType(r.Type),
+			Status:         domain.AttendanceStatus(r.Status),
+			PhotoURL:       r.PhotoPath,
+			Address:        r.Address,
+			Source:         domain.AttendanceSource(r.Source),
+			ApprovalStatus: domain.ApprovalStatus(r.ApprovalStatus),
+			LocationID:     r.LocationID.String,
+			OccurredAt:     parseRFC3339Nano(r.OccurredAt).In(time.Local),
+		}
+		out = append(out, item)
+	}
+	return out, total, nil
+}
+
+// DecideApproval approves or rejects a pending attendance on behalf of the
+// actor. A supervisor may only decide records of their own team; super_admin
+// and hr may decide any record. The decision is stamped on the attendance
+// and recorded in the approval audit trail.
+func (s *AdminService) DecideApproval(ctx context.Context, actorRole domain.UserRole, actorID, attendanceID, action, reason string) (*domain.Attendance, error) {
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action != "approve" && action != "reject" {
+		return nil, pkgerrors.Validation("action", "must be approve or reject")
+	}
+	if action == "reject" && strings.TrimSpace(reason) == "" {
+		return nil, pkgerrors.Validation("reason", "alasan wajib diisi saat menolak")
+	}
+
+	a, err := s.attendances.FindByID(ctx, attendanceID)
+	if err != nil {
+		return nil, err
+	}
+	if a.ApprovalStatus != domain.ApprovalPending {
+		return nil, pkgerrors.Conflict("attendance", "approval_status", string(a.ApprovalStatus))
+	}
+
+	// Supervisor scoping: the owner of the record must be in the actor's
+	// team (manager_id == actorID).
+	if actorRole == domain.RoleSupervisor {
+		owner, err := s.users.FindByID(ctx, a.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if owner.ManagerID != actorID {
+			return nil, pkgerrors.Forbidden("attendance ini bukan milik tim anda")
+		}
+	}
+
+	now := time.Now().UTC()
+	if action == "approve" {
+		a.ApprovalStatus = domain.ApprovalApproved
+		a.RejectionReason = ""
+	} else {
+		a.ApprovalStatus = domain.ApprovalRejected
+		a.RejectionReason = strings.TrimSpace(reason)
+	}
+	a.ApprovedBy = actorID
+	a.ApprovedAt = &now
+
+	if err := s.attendances.UpdateApprovalStatus(ctx, a.ID, a.ApprovalStatus, actorID, now, a.RejectionReason); err != nil {
+		return nil, err
+	}
+	log := &domain.ApprovalLog{
+		AttendanceID: a.ID,
+		ActorID:      actorID,
+		Action:       action,
+		Reason:       strings.TrimSpace(reason),
+	}
+	if err := s.attendances.InsertApprovalLog(ctx, log); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 // ===== Settings (admin) =====

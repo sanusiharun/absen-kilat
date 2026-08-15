@@ -25,7 +25,11 @@ export type IconName =
   | "lock"
   | "key"
   | "shield"
-  | "edit";
+  | "edit"
+  | "check-list"
+  | "qrcode"
+  | "copy"
+  | "check";
 
 export function Icon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -149,6 +153,27 @@ export function Icon({ name, className = "h-5 w-5" }: { name: IconName; classNam
         <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" />
       </>
     ),
+    "check-list": (
+      <>
+        <path d="m3 17 2 2 4-4" />
+        <path d="m3 7 2 2 4-4" />
+        <path d="M13 6h8M13 12h8M13 18h8" />
+      </>
+    ),
+    qrcode: (
+      <>
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M7 7h3v3H7zM14 7h3v3h-3zM7 14h3v3H7z" />
+        <path d="M14 14h3v3h-3z" />
+      </>
+    ),
+    copy: (
+      <>
+        <rect width="14" height="14" x="8" y="8" rx="2" />
+        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+      </>
+    ),
+    check: <path d="M20 6 9 17l-5-5" />,
   };
 
   return (

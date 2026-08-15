@@ -97,12 +97,30 @@ func migrate(ctx context.Context, pool *sql.DB) error {
 			return fmt.Errorf("db.migrate: read %s: %w", name, err)
 		}
 
-		tx, err := pool.BeginTx(ctx, nil)
+		// Run the migration on a dedicated connection so the
+		// connection-scoped PRAGMA foreign_keys can be toggled around the
+		// transaction. Schema-rebuild migrations (e.g. 007, which recreates
+		// the users table) require foreign key enforcement OFF during the
+		// rebuild — PRAGMA foreign_keys is a no-op inside a transaction, so
+		// it must be set before BEGIN. Enforcement is re-enabled and the
+		// schema verified (PRAGMA foreign_key_check) right after commit.
+		conn, err := pool.Conn(ctx)
 		if err != nil {
+			return fmt.Errorf("db.migrate: conn %s: %w", name, err)
+		}
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("db.migrate: foreign_keys off %s: %w", name, err)
+		}
+
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			_ = conn.Close()
 			return fmt.Errorf("db.migrate: begin %s: %w", name, err)
 		}
 		if _, err := tx.ExecContext(ctx, string(body)); err != nil {
 			_ = tx.Rollback()
+			_ = conn.Close()
 			return fmt.Errorf("db.migrate: apply %s: %w", name, err)
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -110,13 +128,56 @@ func migrate(ctx context.Context, pool *sql.DB) error {
 			name, time.Now().UTC().Format(time.RFC3339),
 		); err != nil {
 			_ = tx.Rollback()
+			_ = conn.Close()
 			return fmt.Errorf("db.migrate: record %s: %w", name, err)
 		}
 		if err := tx.Commit(); err != nil {
+			_ = conn.Close()
 			return fmt.Errorf("db.migrate: commit %s: %w", name, err)
 		}
 
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("db.migrate: foreign_keys on %s: %w", name, err)
+		}
+		if err := checkForeignKeys(ctx, conn); err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("db.migrate: foreign_key_check %s: %w", name, err)
+		}
+		if err := conn.Close(); err != nil {
+			return fmt.Errorf("db.migrate: close %s: %w", name, err)
+		}
+
 		slog.Info("db: migration applied", "version", name)
+	}
+	return nil
+}
+
+// checkForeignKeys runs PRAGMA foreign_key_check and reports any violated
+// foreign key constraints. It returns nil when the schema is consistent.
+func checkForeignKeys(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var violations []string
+	for rows.Next() {
+		var table string
+		var rowid int64
+		var parent string
+		var fkid int
+		if err := rows.Scan(&table, &rowid, &parent, &fkid); err != nil {
+			return err
+		}
+		violations = append(violations, fmt.Sprintf("%s(rowid=%d)", table, rowid))
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("foreign key violations: %s", strings.Join(violations, ", "))
 	}
 	return nil
 }

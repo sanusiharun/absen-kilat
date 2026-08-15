@@ -8,12 +8,15 @@ import (
 	"time"
 )
 
-// UserRole distinguishes admin from regular employee accounts.
+// UserRole distinguishes privileged (super_admin/hr/supervisor) from
+// regular employee accounts.
 type UserRole string
 
 const (
-	RoleEmployee UserRole = "employee"
-	RoleAdmin    UserRole = "admin"
+	RoleSuperAdmin UserRole = "super_admin"
+	RoleHR         UserRole = "hr"
+	RoleSupervisor UserRole = "supervisor"
+	RoleEmployee   UserRole = "employee"
 )
 
 // User is an application user who records attendances.
@@ -111,6 +114,30 @@ type Location struct {
 	CreatedAt time.Time
 }
 
+// QrToken is a QR attendance token bound to a location. Tokens are
+// permanent per location until revoked (active=0) or expired.
+type QrToken struct {
+	ID         string
+	LocationID string
+	Token      string
+	Active     bool
+	ExpiresAt  *time.Time // nil = never expires
+	CreatedBy  string
+	CreatedAt  time.Time
+}
+
+// QrTokenView is a token joined with its location name (admin listing).
+type QrTokenView struct {
+	ID           string
+	LocationID   string
+	LocationName string
+	Token        string
+	Active       bool
+	ExpiresAt    *time.Time
+	CreatedBy    string
+	CreatedAt    time.Time
+}
+
 // ApprovalLog is one entry of the approval audit trail.
 type ApprovalLog struct {
 	ID           string
@@ -180,6 +207,20 @@ type AttendanceRepository interface {
 type LocationRepository interface {
 	// ListActive returns all active locations (for geofence checks).
 	ListActive(ctx context.Context) ([]Location, error)
+}
+
+// QrTokenRepository persists QR attendance tokens.
+type QrTokenRepository interface {
+	// Create inserts a new QR token.
+	Create(ctx context.Context, t *QrToken) error
+	// FindByToken returns the token with the given value, or ErrNotFound.
+	FindByToken(ctx context.Context, token string) (*QrToken, error)
+	// ListAll returns every token joined with its location name,
+	// newest first.
+	ListAll(ctx context.Context) ([]QrTokenView, error)
+	// SetActive revokes (active=false) or re-activates a token.
+	// Returns ErrNotFound when the id is unknown.
+	SetActive(ctx context.Context, id string, active bool) error
 }
 
 // SettingsRepository persists key/value system settings.

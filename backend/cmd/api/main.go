@@ -17,6 +17,7 @@ import (
 
 	"github.com/sanusi/absen-kilat/backend/internal/config"
 	"github.com/sanusi/absen-kilat/backend/internal/db"
+	"github.com/sanusi/absen-kilat/backend/internal/domain"
 	"github.com/sanusi/absen-kilat/backend/internal/repo"
 	"github.com/sanusi/absen-kilat/backend/internal/service"
 	"github.com/sanusi/absen-kilat/backend/internal/storage"
@@ -55,6 +56,7 @@ func main() {
 	locationRepo := repo.NewLocationRepository(pool)
 	settingsRepo := repo.NewSettingsRepository(pool)
 	notificationRepo := repo.NewNotificationRepository(gdb)
+	qrTokenRepo := repo.NewQrTokenRepository(pool)
 	settingsSvc := service.NewSettingsService(settingsRepo)
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
 	attendanceSvc := service.NewAttendanceService(attendanceRepo, locationRepo, settingsSvc, cfg.CutoffHour, service.OfficeConfig{
@@ -65,6 +67,7 @@ func main() {
 	profileSvc := service.NewProfileService(userRepo)
 	notificationSvc := service.NewNotificationService(notificationRepo)
 	adminSvc := service.NewAdminService(userRepo, attendanceRepo, locationRepo, settingsSvc, cfg.AdminEmail)
+	qrSvc := service.NewQrService(qrTokenRepo, locationRepo, userRepo, attendanceRepo)
 	appSvc := service.NewAppService(settingsSvc, locationRepo)
 	geocodeSvc := service.NewGeocodeService()
 
@@ -85,6 +88,7 @@ func main() {
 	profileHandler := transport.NewProfileHandler(profileSvc, photoStore, authSvc)
 	notificationHandler := transport.NewNotificationHandler(notificationSvc)
 	adminHandler := transport.NewAdminHandler(adminSvc)
+	qrHandler := transport.NewQrHandler(qrSvc, photoStore)
 	appInfoHandler := transport.NewAppInfoHandler(appSvc)
 	geocodeHandler := transport.NewGeocodeHandler(geocodeSvc)
 
@@ -113,6 +117,10 @@ func main() {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		authHandler.RegisterRoutes(r)
+		// Public QR attendance: no auth (token + rate limit + dedup guard
+		// the endpoint). Must stay OUTSIDE the RequireAuth group.
+		qrHandler.RegisterPublicRoutes(r)
+
 		r.Group(func(r chi.Router) {
 			r.Use(transport.RequireAuth(authSvc))
 			attendanceHandler.RegisterRoutes(r)
@@ -121,10 +129,18 @@ func main() {
 			geocodeHandler.RegisterRoutes(r)
 			appInfoHandler.RegisterRoutes(r)
 
-			// Admin-only routes: auth + role check.
+			// Admin dashboard: auth + role check (super_admin | hr).
 			r.Group(func(r chi.Router) {
-				r.Use(transport.RequireAdmin(profileSvc))
+				r.Use(transport.RequireRole(profileSvc, domain.RoleSuperAdmin, domain.RoleHR))
 				adminHandler.RegisterRoutes(r)
+				qrHandler.RegisterRoutes(r)
+			})
+
+			// Approval queue: supervisors see/decide their own team;
+			// super_admin and hr see everything.
+			r.Group(func(r chi.Router) {
+				r.Use(transport.RequireRole(profileSvc, domain.RoleSupervisor, domain.RoleSuperAdmin, domain.RoleHR))
+				adminHandler.RegisterApprovalRoutes(r)
 			})
 		})
 	})

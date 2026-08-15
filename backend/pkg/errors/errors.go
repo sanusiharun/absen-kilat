@@ -12,9 +12,15 @@ import (
 type ErrNotFound struct {
 	Resource string
 	ID       string
+	// Message optionally overrides the default templated message (e.g. a
+	// user-facing hint that must not echo back the searched value).
+	Message string
 }
 
 func (e *ErrNotFound) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
 	return fmt.Sprintf("%s with id %q not found", e.Resource, e.ID)
 }
 
@@ -23,9 +29,14 @@ type ErrConflict struct {
 	Resource string
 	Field    string
 	Value    string
+	// Message optionally overrides the default templated message.
+	Message string
 }
 
 func (e *ErrConflict) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
 	return fmt.Sprintf("%s with %s=%q already exists", e.Resource, e.Field, e.Value)
 }
 
@@ -91,9 +102,19 @@ func NotFound(resource, id string) error {
 	return &ErrNotFound{Resource: resource, ID: id}
 }
 
+// NotFoundMessage creates an ErrNotFound with a custom user-facing message.
+func NotFoundMessage(resource, id, message string) error {
+	return &ErrNotFound{Resource: resource, ID: id, Message: message}
+}
+
 // Conflict creates an ErrConflict error.
 func Conflict(resource, field, value string) error {
 	return &ErrConflict{Resource: resource, Field: field, Value: value}
+}
+
+// ConflictMessage creates an ErrConflict with a custom user-facing message.
+func ConflictMessage(resource, field, value, message string) error {
+	return &ErrConflict{Resource: resource, Field: field, Value: value, Message: message}
 }
 
 // Validation creates a single-field ErrValidation error.

@@ -62,10 +62,11 @@ type userFetcher interface {
 	Get(ctx context.Context, userID string) (*domain.User, error)
 }
 
-// RequireAdmin returns middleware that runs after RequireAuth and only lets
-// active admin accounts through. The role is read from the datastore (not the
-// token) so that promotion/revocation takes effect immediately.
-func RequireAdmin(fetch userFetcher) func(http.Handler) http.Handler {
+// RequireRole returns middleware that runs after RequireAuth and only lets
+// active accounts whose role is one of roles through. The role is read from
+// the datastore (not the token) so that promotion/revocation takes effect
+// immediately.
+func RequireRole(fetch userFetcher, roles ...domain.UserRole) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID := UserIDFromContext(r.Context())
@@ -74,17 +75,32 @@ func RequireAdmin(fetch userFetcher) func(http.Handler) http.Handler {
 				return
 			}
 			u, err := fetch.Get(r.Context(), userID)
-			if err != nil || u.Role != domain.RoleAdmin || !u.IsActive {
+			if err != nil || !u.IsActive || !roleIn(u.Role, roles) {
 				httpx.WriteHTTPError(w, httpx.ErrForbidden)
 				return
 			}
-			ctx := context.WithValue(r.Context(), ctxKeyUserRole, string(domain.RoleAdmin))
+			ctx := context.WithValue(r.Context(), ctxKeyUserRole, string(u.Role))
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// UserRoleFromContext returns the role stored by RequireAdmin, or "".
+// RequireAdmin is RequireRole for the admin dashboard: super_admin + hr.
+func RequireAdmin(fetch userFetcher) func(http.Handler) http.Handler {
+	return RequireRole(fetch, domain.RoleSuperAdmin, domain.RoleHR)
+}
+
+// roleIn reports whether role is one of roles.
+func roleIn(role domain.UserRole, roles []domain.UserRole) bool {
+	for _, r := range roles {
+		if role == r {
+			return true
+		}
+	}
+	return false
+}
+
+// UserRoleFromContext returns the role stored by RequireRole, or "".
 func UserRoleFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(ctxKeyUserRole).(string)
 	return v

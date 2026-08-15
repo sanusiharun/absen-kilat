@@ -32,6 +32,9 @@ type adminService interface {
 	UpdateLocation(ctx context.Context, id string, up service.LocationUpdate) (*domain.Location, error)
 	DeleteLocation(ctx context.Context, id string) error
 	OverrideAttendance(ctx context.Context, id, actorID string, ov service.OverrideInput) (*domain.Attendance, error)
+	Team(ctx context.Context, managerID string) ([]domain.User, error)
+	Approvals(ctx context.Context, actorRole domain.UserRole, actorID, status string, limit, offset int) ([]service.ApprovalItem, int, error)
+	DecideApproval(ctx context.Context, actorRole domain.UserRole, actorID, attendanceID, action, reason string) (*domain.Attendance, error)
 }
 
 // AdminHandler wires admin-only endpoints onto a router.
@@ -65,6 +68,15 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/admin/devices", h.devices)
 	r.Get("/admin/settings", h.getSettings)
 	r.Put("/admin/settings", h.putSettings)
+}
+
+// RegisterApprovalRoutes mounts the approval endpoints (team + approval
+// queue). The caller is expected to guard them with RequireAuth +
+// RequireRole(supervisor, super_admin, hr).
+func (h *AdminHandler) RegisterApprovalRoutes(r chi.Router) {
+	r.Get("/admin/team", h.team)
+	r.Get("/admin/approvals", h.approvals)
+	r.Post("/admin/approvals/{id}", h.decideApproval)
 }
 
 func (h *AdminHandler) stats(w http.ResponseWriter, r *http.Request) {
@@ -173,14 +185,12 @@ func (h *AdminHandler) updateUser(w http.ResponseWriter, r *http.Request) {
 
 	var up service.UserUpdate
 	if body.Role != nil {
-		switch domain.UserRole(*body.Role) {
-		case domain.RoleAdmin, domain.RoleEmployee:
-			role := domain.UserRole(*body.Role)
-			up.Role = &role
-		default:
-			httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "role must be admin or employee"))
+		role := domain.UserRole(*body.Role)
+		if !validUserRole(role) {
+			httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "role must be super_admin, hr, supervisor, or employee"))
 			return
 		}
+		up.Role = &role
 	}
 	up.IsActive = body.IsActive
 	up.NIP = body.NIP
@@ -214,8 +224,8 @@ func (h *AdminHandler) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role := domain.UserRole(body.Role)
-	if body.Role != "" && role != domain.RoleAdmin && role != domain.RoleEmployee {
-		httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "role must be admin or employee"))
+	if body.Role != "" && !validUserRole(role) {
+		httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "role must be super_admin, hr, supervisor, or employee"))
 		return
 	}
 
@@ -642,6 +652,117 @@ func parseDays(r *http.Request, def int) int {
 		n = 365
 	}
 	return n
+}
+
+// validUserRole reports whether r is one of the four accepted roles.
+func validUserRole(r domain.UserRole) bool {
+	switch r {
+	case domain.RoleSuperAdmin, domain.RoleHR, domain.RoleSupervisor, domain.RoleEmployee:
+		return true
+	}
+	return false
+}
+
+// ===== Approval queue (issue #17) =====
+
+func (h *AdminHandler) team(w http.ResponseWriter, r *http.Request) {
+	actorID := UserIDFromContext(r.Context())
+	if actorID == "" {
+		httpx.WriteHTTPError(w, httpx.ErrUnauthorized)
+		return
+	}
+	users, err := h.svc.Team(r.Context(), actorID)
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	resp := make([]adminUserResponse, 0, len(users))
+	for i := range users {
+		resp = append(resp, toAdminUserResponse(&users[i]))
+	}
+	httpx.WriteOK(w, map[string]any{"users": resp})
+}
+
+func (h *AdminHandler) approvals(w http.ResponseWriter, r *http.Request) {
+	actorID := UserIDFromContext(r.Context())
+	if actorID == "" {
+		httpx.WriteHTTPError(w, httpx.ErrUnauthorized)
+		return
+	}
+	actorRole := domain.UserRole(UserRoleFromContext(r.Context()))
+
+	q := r.URL.Query()
+	status := q.Get("status")
+	if status != "" && status != string(domain.ApprovalPending) &&
+		status != string(domain.ApprovalApproved) && status != string(domain.ApprovalRejected) {
+		httpx.WriteHTTPError(w, httpx.NewHTTPError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "status must be pending, approved, or rejected"))
+		return
+	}
+	limit := 100
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	offset := 0
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			offset = n
+		}
+	}
+
+	list, total, err := h.svc.Approvals(r.Context(), actorRole, actorID, status, limit, offset)
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	resp := make([]map[string]any, 0, len(list))
+	for _, a := range list {
+		resp = append(resp, map[string]any{
+			"id":               a.ID,
+			"user_id":          a.UserID,
+			"user_name":        a.UserName,
+			"user_email":       a.UserEmail,
+			"type":             string(a.Type),
+			"status":           string(a.Status),
+			"photo_url":        a.PhotoURL,
+			"address":          a.Address,
+			"source":           string(a.Source),
+			"approval_status":  string(a.ApprovalStatus),
+			"location_id":      a.LocationID,
+			"occurred_at":      a.OccurredAt.Format(time.RFC3339),
+		})
+	}
+	httpx.WriteOK(w, map[string]any{"approvals": resp, "total": total})
+}
+
+func (h *AdminHandler) decideApproval(w http.ResponseWriter, r *http.Request) {
+	actorID := UserIDFromContext(r.Context())
+	if actorID == "" {
+		httpx.WriteHTTPError(w, httpx.ErrUnauthorized)
+		return
+	}
+	actorRole := domain.UserRole(UserRoleFromContext(r.Context()))
+	id := chi.URLParam(r, "id")
+
+	var body struct {
+		Action string `json:"action"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.WriteHTTPError(w, httpx.ErrBadRequest)
+		return
+	}
+
+	a, err := h.svc.DecideApproval(r.Context(), actorRole, actorID, id, body.Action, body.Reason)
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteOK(w, map[string]any{"attendance": toAdminAttendanceRow(a)})
 }
 
 // ttpxErr routes an error to the shared error envelope writer.

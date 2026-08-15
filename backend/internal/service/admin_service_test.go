@@ -61,8 +61,8 @@ func TestAdminService_SeedAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admin not found: %v", err)
 	}
-	if a.Role != domain.RoleAdmin {
-		t.Fatalf("role = %q, want admin", a.Role)
+	if a.Role != domain.RoleSuperAdmin {
+		t.Fatalf("role = %q, want super_admin", a.Role)
 	}
 	if !a.IsActive {
 		t.Fatal("admin should be active")
@@ -120,7 +120,7 @@ func TestAdminService_TodayStats(t *testing.T) {
 func TestAdminService_UpdateUserCannotDeactivateSelf(t *testing.T) {
 	ctx := context.Background()
 	svc, ur, _ := newAdminTestEnv(t)
-	admin := addUser(t, ur, "admin@test.dev", domain.RoleAdmin)
+	admin := addUser(t, ur, "admin@test.dev", domain.RoleSuperAdmin)
 
 	falseVal := false
 	// Admin must not be able to deactivate their own account.
@@ -146,7 +146,7 @@ func TestAdminService_UpdateUserCannotDeactivateSelf(t *testing.T) {
 func TestAdminService_UpdateUserByOtherAdmin(t *testing.T) {
 	ctx := context.Background()
 	svc, ur, _ := newAdminTestEnv(t)
-	admin := addUser(t, ur, "admin@test.dev", domain.RoleAdmin)
+	admin := addUser(t, ur, "admin@test.dev", domain.RoleSuperAdmin)
 	target := addUser(t, ur, "emp@test.dev", domain.RoleEmployee)
 
 	// Admin can deactivate another employee.
@@ -380,12 +380,12 @@ func TestAdminService_CreateUser(t *testing.T) {
 	}
 
 	// Admin role is allowed.
-	u3, err := svc.CreateUser(ctx, CreateUserInput{Email: "boss@test.dev", Password: "secret123", Name: "Boss", Role: domain.RoleAdmin})
+	u3, err := svc.CreateUser(ctx, CreateUserInput{Email: "boss@test.dev", Password: "secret123", Name: "Boss", Role: domain.RoleSuperAdmin})
 	if err != nil {
 		t.Fatalf("CreateUser admin: %v", err)
 	}
-	if u3.Role != domain.RoleAdmin {
-		t.Fatalf("role = %q, want admin", u3.Role)
+	if u3.Role != domain.RoleSuperAdmin {
+		t.Fatalf("role = %q, want super_admin", u3.Role)
 	}
 
 	// Employee code: accepted, and duplicates are rejected.

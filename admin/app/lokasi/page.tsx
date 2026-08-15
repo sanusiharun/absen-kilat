@@ -7,6 +7,7 @@ import AdminShell from "@/components/admin-shell";
 import { Icon } from "@/components/icons";
 import { Card, CardHeader, ErrorBanner, Pill, Spinner, inputCls } from "@/components/ui";
 import { Select } from "@/components/fields";
+import { formatDateTime } from "@/lib/format";
 
 type Location = {
   id: string;
@@ -17,6 +18,21 @@ type Location = {
   radius_m: number;
   active: boolean;
   created_at?: string;
+};
+
+type QrToken = {
+  id: string;
+  location_id: string;
+  location_name?: string;
+  active: boolean;
+  created_at?: string;
+};
+
+type FreshQr = {
+  token: string;
+  url: string;
+  dataUrl: string;
+  locationName: string;
 };
 
 type LocForm = {
@@ -49,6 +65,36 @@ export default function LokasiPage() {
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // ---- QR management (Fase C) ----
+  const [qrTokens, setQrTokens] = useState<QrToken[]>([]);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState("");
+  const [qrSuccess, setQrSuccess] = useState("");
+  const [qrBusy, setQrBusy] = useState<string | null>(null); // id token / lokasi yang sedang diproses
+  const [freshQr, setFreshQr] = useState<FreshQr | null>(null);
+  const [qrCache, setQrCache] = useState<Record<string, string>>({}); // location_id -> dataUrl
+  const [copied, setCopied] = useState(false);
+
+  const loadQrTokens = useCallback(async () => {
+    if (!getToken()) return;
+    try {
+      const d = await api<{ tokens: QrToken[] }>("/admin/qr");
+      setQrTokens(d.tokens || []);
+      setQrError("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/NOT_FOUND|not found|404/i.test(msg)) {
+        setQrError("Fitur QR belum tersedia di server. Silakan coba lagi nanti.");
+      } else if (!/401|403/.test(msg)) {
+        setQrError(msg);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    loadQrTokens();
+  }, [loadQrTokens]);
 
   const load = useCallback(async () => {
     if (!getToken()) {
@@ -145,6 +191,85 @@ export default function LokasiPage() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  // ---- QR management handlers ----
+
+  async function generateQr(l: Location) {
+    setQrBusy(l.id);
+    setQrError("");
+    setQrSuccess("");
+    setCopied(false);
+    try {
+      const d = await api<{ token: string; url: string }>("/admin/qr", {
+        method: "POST",
+        body: JSON.stringify({ location_id: l.id }),
+      });
+      // Generate image QR dari URL publik (pakai npm qrcode; kalau gagal -> fallback teks URL saja)
+      let dataUrl = "";
+      try {
+        const QRCode = (await import("qrcode")).default;
+        dataUrl = await QRCode.toDataURL(d.url, { width: 240, margin: 2 });
+      } catch {
+        dataUrl = "";
+      }
+      setQrCache((prev) => ({ ...prev, [l.id]: dataUrl }));
+      setFreshQr({ token: d.token, url: d.url, dataUrl, locationName: l.name });
+      setQrSuccess(`QR untuk "${l.name}" berhasil dibuat`);
+      loadQrTokens();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setQrError(
+        /NOT_FOUND|not found|404/i.test(msg)
+          ? "Fitur QR belum tersedia di server. Silakan coba lagi nanti."
+          : msg,
+      );
+    } finally {
+      setQrBusy(null);
+    }
+  }
+
+  async function revokeQr(t: QrToken) {
+    setQrBusy(t.id);
+    setQrError("");
+    setQrSuccess("");
+    try {
+      await api<{ ok: boolean }>(`/admin/qr/${t.id}`, { method: "DELETE" });
+      setQrSuccess("Token QR dicabut (revoke)");
+      loadQrTokens();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setQrError(
+        /NOT_FOUND|not found|404/i.test(msg)
+          ? "Fitur QR belum tersedia di server. Silakan coba lagi nanti."
+          : msg,
+      );
+    } finally {
+      setQrBusy(null);
+    }
+  }
+
+  async function copyQrUrl(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback lama: pilih teks
+      setQrError("Gagal menyalin otomatis. Silakan salin URL secara manual.");
+    }
+  }
+
+  // Tampilkan QR yang sudah dibuat di sesi ini (tanpa URL karena GET /admin/qr tidak mengembalikan token).
+  function viewCachedQr(t: QrToken) {
+    const cached = qrCache[t.location_id];
+    if (!cached) return;
+    setFreshQr({
+      token: "",
+      url: freshQr && freshQr.dataUrl === cached ? freshQr.url : "",
+      dataUrl: cached,
+      locationName: t.location_name || "Lokasi",
+    });
   }
 
   const total = locs.length;
@@ -268,6 +393,196 @@ export default function LokasiPage() {
           )}
         </div>
       </Card>
+
+      {/* ===== Manajemen QR Absensi (Fase C) ===== */}
+      <div className="mt-8">
+        {qrError && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-400">
+            {qrError}
+          </div>
+        )}
+        {qrSuccess && (
+          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-400">
+            {qrSuccess}
+          </div>
+        )}
+
+        <Card>
+          <CardHeader
+            title="QR Absensi"
+            subtitle="Buat token QR per lokasi aktif untuk absensi publik tanpa login"
+          />
+
+          {/* Tombol buat QR per lokasi aktif */}
+          <div className="border-b border-slate-100 px-6 py-4 dark:border-slate-800">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Lokasi Aktif
+            </div>
+            {locs.filter((l) => l.active).length === 0 ? (
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                Tidak ada lokasi aktif. Aktifkan lokasi terlebih dahulu untuk membuat QR.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {locs
+                  .filter((l) => l.active)
+                  .map((l) => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      disabled={qrBusy === l.id}
+                      onClick={() => generateQr(l)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:opacity-50 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-400 dark:hover:bg-indigo-500/20"
+                    >
+                      <Icon name="qrcode" className="h-4 w-4" />
+                      {qrBusy === l.id ? "Membuat..." : `Buat QR · ${l.name}`}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
+
+          {/* Daftar token */}
+          <div className="overflow-x-auto">
+            {qrLoading ? (
+              <Spinner label="Memuat token QR..." />
+            ) : qrTokens.length === 0 ? (
+              <div className="flex flex-col items-center px-6 py-10 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500">
+                  <Icon name="qrcode" className="h-6 w-6" />
+                </div>
+                <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-slate-200">Belum ada token QR</p>
+                <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                  Klik "Buat QR" pada salah satu lokasi aktif di atas.
+                </p>
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                    <th className="px-6 py-3">Lokasi</th>
+                    <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3">Dibuat</th>
+                    <th className="px-6 py-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qrTokens.map((t) => (
+                    <tr
+                      key={t.id}
+                      className="border-b border-slate-50 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/40"
+                    >
+                      <td className="px-6 py-3 font-medium text-slate-900 dark:text-slate-100">
+                        {t.location_name || t.location_id || "—"}
+                      </td>
+                      <td className="px-6 py-3">
+                        <Pill
+                          className={
+                            t.active
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+                              : "bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400"
+                          }
+                        >
+                          {t.active ? "Aktif" : "Nonaktif"}
+                        </Pill>
+                      </td>
+                      <td className="px-6 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300">
+                        {t.created_at ? formatDateTime(t.created_at) : "—"}
+                      </td>
+                      <td className="px-6 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          {qrCache[t.location_id] && (
+                            <button
+                              type="button"
+                              onClick={() => viewCachedQr(t)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                            >
+                              <Icon name="qrcode" className="h-3.5 w-3.5" />
+                              Lihat QR
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={qrBusy === t.id}
+                            onClick={() => revokeQr(t)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/40"
+                          >
+                            {qrBusy === t.id ? "Memproses..." : "Revoke"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* Modal preview QR */}
+      {freshQr && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 dark:bg-slate-950/70">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-900 dark:ring-1 dark:ring-slate-800">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">QR Absensi</h3>
+              <button
+                type="button"
+                onClick={() => setFreshQr(null)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              >
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+              QR untuk <span className="font-semibold text-slate-900 dark:text-slate-100">{freshQr.locationName}</span>.
+              Karyawan memindai QR ini lalu mengisi form absensi publik.
+            </p>
+            <div className="flex justify-center rounded-2xl border border-slate-100 bg-white p-4 dark:border-slate-800">
+              {freshQr.dataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={freshQr.dataUrl} alt={`QR Absensi ${freshQr.locationName}`} className="h-48 w-48" />
+              ) : (
+                <div className="flex h-48 w-48 items-center justify-center rounded-xl bg-slate-50 text-xs text-slate-400 dark:bg-slate-800 dark:text-slate-500">
+                  Gambar QR tidak tersedia
+                </div>
+              )}
+            </div>
+            <div className="mt-4">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                URL Publik
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={freshQr.url}
+                  onFocus={(e) => e.target.select()}
+                  placeholder={freshQr.url ? "" : "URL tidak tersedia untuk token lama"}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                />
+                <button
+                  type="button"
+                  disabled={!freshQr.url}
+                  onClick={() => copyQrUrl(freshQr.url)}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Icon name={copied ? "check" : "copy"} className="h-3.5 w-3.5" />
+                  {copied ? "Tersalin" : "Salin"}
+                </button>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setFreshQr(null)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal tambah/edit lokasi */}
       {modal !== null && (

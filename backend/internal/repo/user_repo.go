@@ -102,6 +102,39 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*domain.User,
 	return scanUser(row)
 }
 
+// FindByEmployeeCode returns the user with the given employee_code
+// (case-insensitive), or ErrNotFound.
+func (r *UserRepository) FindByEmployeeCode(ctx context.Context, code string) (*domain.User, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT `+userCols+` FROM users WHERE employee_code = ? COLLATE NOCASE`, code)
+	return scanUser(row)
+}
+
+// ListByManager returns the users whose manager_id equals managerID
+// (the manager's direct reports), ordered by name.
+func (r *UserRepository) ListByManager(ctx context.Context, managerID string) ([]domain.User, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+userCols+` FROM users WHERE manager_id = ? ORDER BY name ASC`, managerID)
+	if err != nil {
+		return nil, fmt.Errorf("repo.UserRepository.ListByManager: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.User
+	for rows.Next() {
+		var d userDAO
+		if err := rows.Scan(&d.ID, &d.Email, &d.PasswordHash, &d.Name, &d.AvatarPath,
+			&d.IsEmailVerified, &d.NotificationEnabled, &d.Role, &d.IsActive,
+			&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
+			&d.ManagerID, &d.EmployeeCode,
+			&d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("repo.UserRepository.ListByManager: scan: %w", err)
+		}
+		out = append(out, userFromDAO(d))
+	}
+	return out, rows.Err()
+}
+
 func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 	u.UpdatedAt = time.Now().UTC()
 	res, err := r.db.ExecContext(ctx, `

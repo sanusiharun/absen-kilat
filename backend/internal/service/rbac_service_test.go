@@ -156,7 +156,7 @@ func TestAdminService_LocationCRUD(t *testing.T) {
 func TestAdminService_OverrideAttendance(t *testing.T) {
 	ctx := context.Background()
 	svc, ur, ar, pool := newAdminTestEnvFull(t)
-	admin := addUser(t, ur, "admin@test.dev", domain.RoleAdmin)
+	admin := addUser(t, ur, "admin@test.dev", domain.RoleSuperAdmin)
 	emp := addUser(t, ur, "emp@test.dev", domain.RoleEmployee)
 
 	att := &domain.Attendance{
