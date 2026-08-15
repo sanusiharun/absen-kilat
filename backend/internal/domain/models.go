@@ -8,6 +8,14 @@ import (
 	"time"
 )
 
+// UserRole distinguishes admin from regular employee accounts.
+type UserRole string
+
+const (
+	RoleEmployee UserRole = "employee"
+	RoleAdmin    UserRole = "admin"
+)
+
 // User is an application user who records attendances.
 type User struct {
 	ID                  string
@@ -17,6 +25,8 @@ type User struct {
 	AvatarPath          string
 	IsEmailVerified     bool
 	NotificationEnabled bool
+	Role                UserRole
+	IsActive            bool
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
@@ -46,8 +56,35 @@ type Attendance struct {
 	PhotoPath  string
 	Latitude   *float64
 	Longitude  *float64
+	Address    string
+	Notes      string
+	Device     string
+	IPAddress  string
+	DistanceM  *int // meters from the office point (geofencing)
 	OccurredAt time.Time
 	CreatedAt  time.Time
+}
+
+// Notification is a user-facing message shown in the Notifications tab.
+type Notification struct {
+	ID        string
+	UserID    string
+	Title     string
+	Body      string
+	IsRead    bool
+	CreatedAt time.Time
+}
+
+// LocationStat is an aggregate of attendance records grouped by address.
+type LocationStat struct {
+	Location string
+	Count    int
+}
+
+// DeviceStat is an aggregate of attendance records grouped by device.
+type DeviceStat struct {
+	Device string
+	Count  int
 }
 
 // UserRepository persists users.
@@ -71,4 +108,17 @@ type AttendanceRepository interface {
 	ListByUserDate(ctx context.Context, userID string, date time.Time, loc *time.Location) ([]Attendance, error)
 	// FindByID returns the attendance with the given id, or ErrNotFound.
 	FindByID(ctx context.Context, id string) (*Attendance, error)
+}
+
+// NotificationRepository persists user notifications.
+type NotificationRepository interface {
+	// Create inserts a new notification.
+	Create(ctx context.Context, n *Notification) error
+	// ListByUser returns a user's notifications newest first.
+	ListByUser(ctx context.Context, userID string) ([]Notification, error)
+	// MarkRead marks a user's notification (or all if id == "") as read.
+	// Returns ErrNotFound when id is given but does not belong to the user.
+	MarkRead(ctx context.Context, userID, id string) error
+	// UnreadCount returns how many notifications a user has not read.
+	UnreadCount(ctx context.Context, userID string) (int, error)
 }

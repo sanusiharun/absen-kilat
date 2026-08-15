@@ -42,12 +42,36 @@ func main() {
 	defer pool.Close()
 	logger.Info("database ready", "path", cfg.DBPath)
 
+	// GORM handle for ORM-backed repositories (e.g. notifications).
+	gdb, err := db.OpenGORM(cfg.DBPath)
+	if err != nil {
+		logger.Error("gorm init failed", "error", err)
+		os.Exit(1)
+	}
+
 	// Wire repositories and services.
 	userRepo := repo.NewUserRepository(pool)
 	attendanceRepo := repo.NewAttendanceRepository(pool)
+	notificationRepo := repo.NewNotificationRepository(gdb)
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
-	attendanceSvc := service.NewAttendanceService(attendanceRepo, cfg.CutoffHour)
+	attendanceSvc := service.NewAttendanceService(attendanceRepo, cfg.CutoffHour, service.OfficeConfig{
+		Lat:     cfg.OfficeLat,
+		Lng:     cfg.OfficeLng,
+		RadiusM: cfg.AbsenRadiusM,
+	})
 	profileSvc := service.NewProfileService(userRepo)
+	notificationSvc := service.NewNotificationService(notificationRepo)
+	adminSvc := service.NewAdminService(userRepo, attendanceRepo, cfg.AdminEmail)
+	geocodeSvc := service.NewGeocodeService()
+
+	// Seed the initial admin account when configured.
+	if cfg.AdminPassword != "" {
+		if err := adminSvc.SeedAdmin(ctx, cfg.AdminPassword); err != nil {
+			logger.Error("seed admin failed", "error", err)
+		} else {
+			logger.Info("admin account ensured", "email", cfg.AdminEmail)
+		}
+	}
 
 	// photoStore adapts storage.Store to transport.photoStorer.
 	photoStore := &photoStoreAdapter{Dir: cfg.UploadDir}
@@ -55,11 +79,15 @@ func main() {
 	authHandler := transport.NewAuthHandler(authSvc)
 	attendanceHandler := transport.NewAttendanceHandler(attendanceSvc, photoStore)
 	profileHandler := transport.NewProfileHandler(profileSvc, photoStore, authSvc)
+	notificationHandler := transport.NewNotificationHandler(notificationSvc)
+	adminHandler := transport.NewAdminHandler(adminSvc)
+	geocodeHandler := transport.NewGeocodeHandler(geocodeSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(transport.RequestLogger(logger))
+	r.Use(transport.CORSMiddleware)
 
 	// Unknown routes respond with the contract error envelope.
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
@@ -79,6 +107,14 @@ func main() {
 			r.Use(transport.RequireAuth(authSvc))
 			attendanceHandler.RegisterRoutes(r)
 			profileHandler.RegisterRoutes(r)
+			notificationHandler.RegisterRoutes(r)
+			geocodeHandler.RegisterRoutes(r)
+
+			// Admin-only routes: auth + role check.
+			r.Group(func(r chi.Router) {
+				r.Use(transport.RequireAdmin(profileSvc))
+				adminHandler.RegisterRoutes(r)
+			})
 		})
 	})
 

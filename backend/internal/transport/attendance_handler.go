@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -54,6 +55,10 @@ type attendanceResponse struct {
 	PhotoURL   string   `json:"photo_url"`
 	Latitude   *float64 `json:"latitude,omitempty"`
 	Longitude  *float64 `json:"longitude,omitempty"`
+	Address    string   `json:"address,omitempty"`
+	Device     string   `json:"device,omitempty"`
+	IPAddress  string   `json:"ip_address,omitempty"`
+	DistanceM  *int     `json:"distance_m,omitempty"`
 	OccurredAt string   `json:"occurred_at"`
 }
 
@@ -112,6 +117,10 @@ func (h *AttendanceHandler) create(w http.ResponseWriter, r *http.Request) {
 		PhotoPath: photoPath,
 		Latitude:  lat,
 		Longitude: lng,
+		Address:   r.FormValue("address"),
+		Notes:     r.FormValue("notes"),
+		Device:    r.FormValue("device"),
+		IPAddress: clientIP(r.RemoteAddr),
 		Location:  time.Local,
 	}
 
@@ -213,6 +222,10 @@ func (h *AttendanceHandler) toResponse(a *domain.Attendance) attendanceResponse 
 		Type:       string(a.Type),
 		Status:     string(a.Status),
 		PhotoURL:   a.PhotoPath,
+		Address:    a.Address,
+		Device:     a.Device,
+		IPAddress:  a.IPAddress,
+		DistanceM:  a.DistanceM,
 		OccurredAt: a.OccurredAt.Format(time.RFC3339),
 	}
 	if a.Latitude != nil {
@@ -222,4 +235,14 @@ func (h *AttendanceHandler) toResponse(a *domain.Attendance) attendanceResponse 
 		resp.Longitude = a.Longitude
 	}
 	return resp
+}
+
+// clientIP extracts the IP from a RemoteAddr, stripping the port and handling
+// IPv6 brackets (e.g. "[::1]:8080" → "::1"). Falls back to the raw value.
+func clientIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
 }

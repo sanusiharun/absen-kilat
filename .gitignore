@@ -2,8 +2,12 @@ backend/uploads/
 *.db
 *.db-journal
 .env
+.env.local
 node_modules/
 .expo/
 dist/
 backend/data/
 backend/uploads/
+admin/.next/
+*.tsbuildinfo
+.DS_Store

@@ -23,6 +23,17 @@ type Config struct {
 	UploadDir string
 	// PublicBaseURL is used to build absolute URLs for uploaded files.
 	PublicBaseURL string
+	// AdminEmail/AdminPassword seed the initial admin account on startup if
+	// no admin exists yet.
+	AdminEmail    string
+	AdminPassword string
+	// OfficeLat/OfficeLng are the office coordinates used for geofencing.
+	OfficeLat float64
+	// OfficeLng is the office longitude.
+	OfficeLng float64
+	// AbsenRadiusM is the maximum distance (meters) from the office at which
+	// an attendance is accepted. 0 disables geofencing.
+	AbsenRadiusM int
 }
 
 // Load reads configuration from environment variables, applying defaults
@@ -36,6 +47,11 @@ func Load() Config {
 		JWTSecret:     getenv("JWT_SECRET", "dev-secret-change-me"),
 		UploadDir:     getenv("UPLOAD_DIR", "uploads"),
 		PublicBaseURL: getenv("PUBLIC_BASE_URL", "http://localhost:8090"),
+		AdminEmail:    getenv("ADMIN_EMAIL", "admin@absenkilat.dev"),
+		AdminPassword: getenv("ADMIN_PASSWORD", ""),
+		OfficeLat:     getenvFloat("OFFICE_LAT", -6.2088),  // Jakarta Selatan
+		OfficeLng:     getenvFloat("OFFICE_LNG", 106.8456), // Jakarta Selatan
+		AbsenRadiusM:  getenvInt("ABSEN_RADIUS_M", 500),
 	}
 }
 
@@ -50,6 +66,15 @@ func getenvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return fallback
+}
+
+func getenvFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return fallback

@@ -47,7 +47,7 @@ func (f *fakeAttendanceRepo) FindByID(_ context.Context, id string) (*domain.Att
 
 func TestCheckInAndCheckOutFlow(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9) // cutoff 09:00
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{}) // cutoff 09:00
 	loc := time.FixedZone("WIB", 7*3600)
 	now := time.Date(2026, 8, 14, 8, 30, 0, 0, loc) // 08:30 → on time
 
@@ -82,7 +82,7 @@ func TestCheckInAndCheckOutFlow(t *testing.T) {
 
 func TestCheckOutWithoutCheckInFails(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9)
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{})
 	loc := time.FixedZone("WIB", 7*3600)
 	now := time.Date(2026, 8, 14, 17, 0, 0, 0, loc)
 
@@ -94,7 +94,7 @@ func TestCheckOutWithoutCheckInFails(t *testing.T) {
 
 func TestLateStatus(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9) // cutoff 09:00
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{}) // cutoff 09:00
 	loc := time.FixedZone("WIB", 7*3600)
 
 	late := time.Date(2026, 8, 14, 9, 30, 0, 0, loc) // 09:30 → late
@@ -109,7 +109,7 @@ func TestLateStatus(t *testing.T) {
 
 func TestTodayState(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9)
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{})
 	loc := time.FixedZone("WIB", 7*3600)
 	now := time.Date(2026, 8, 14, 8, 0, 0, 0, loc)
 
@@ -131,5 +131,47 @@ func TestTodayState(t *testing.T) {
 	}
 	if st.CheckedOut {
 		t.Fatal("should not be checked out yet")
+	}
+}
+
+func TestGeofence(t *testing.T) {
+	ctx := context.Background()
+	// Office at (0,0) with 1000 m radius.
+	svc := NewAttendanceService(&fakeAttendanceRepo{}, 9, OfficeConfig{Lat: 0, Lng: 0, RadiusM: 1000})
+	loc := time.FixedZone("WIB", 7*3600)
+	now := time.Date(2026, 8, 14, 8, 0, 0, 0, loc)
+
+	// ~110 km away -> must be rejected.
+	lat, lng := 1.0, 0.0
+	_, err := svc.CheckIn(ctx, AttendanceInput{
+		UserID: "u-g1", Type: domain.AttendanceCheckIn, Now: now, Location: loc,
+		Latitude: &lat, Longitude: &lng,
+	})
+	if err == nil {
+		t.Fatal("check-in far outside radius should be rejected")
+	}
+
+	// At the office -> accepted and distance recorded (~0 m).
+	lat2, lng2 := 0.0001, 0.0001
+	att, err := svc.CheckIn(ctx, AttendanceInput{
+		UserID: "u-g2", Type: domain.AttendanceCheckIn, Now: now, Location: loc,
+		Latitude: &lat2, Longitude: &lng2,
+	})
+	if err != nil {
+		t.Fatalf("check-in inside radius should pass: %v", err)
+	}
+	if att.DistanceM == nil {
+		t.Fatal("distance should be recorded")
+	}
+
+	// No coordinates -> geofence skipped, no error.
+	att2, err := svc.CheckIn(ctx, AttendanceInput{
+		UserID: "u-g3", Type: domain.AttendanceCheckIn, Now: now, Location: loc,
+	})
+	if err != nil {
+		t.Fatalf("check-in without coords should pass: %v", err)
+	}
+	if att2.DistanceM != nil {
+		t.Fatal("distance should be nil when no coordinates")
 	}
 }

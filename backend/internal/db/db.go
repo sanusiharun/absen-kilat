@@ -14,11 +14,19 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite" // pure-Go SQLite driver
+	// glebarez/go-sqlite is a pure-Go fork of modernc. Using it for BOTH the
+	// raw database/sql pool and the GORM driver avoids a "driver sqlite
+	// registered twice" panic (modernc + glebarez would both claim "sqlite").
+	_ "github.com/glebarez/go-sqlite"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
+
+// dsn builds the SQLite DSN with pragmas applied at open time.
+func dsn(path string) string {
+	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
+}
 
 // Open opens (and creates if needed) the SQLite database at path, then applies
 // any pending migrations. The connection pool is configured for a single
@@ -28,8 +36,7 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("db.Open: mkdir: %w", err)
 	}
 
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
-	pool, err := sql.Open("sqlite", dsn)
+	pool, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("db.Open: sql.Open: %w", err)
 	}

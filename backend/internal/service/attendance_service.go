@@ -25,6 +25,10 @@ type AttendanceInput struct {
 	PhotoPath string
 	Latitude  *float64
 	Longitude *float64
+	Address   string
+	Notes     string
+	Device    string
+	IPAddress string
 	Now       time.Time // wall-clock time of the check (testable)
 	Location  *time.Location
 }
@@ -32,12 +36,13 @@ type AttendanceInput struct {
 // AttendanceService implements attendance business logic.
 type AttendanceService struct {
 	repo       domain.AttendanceRepository
-	cutoffHour int // local hour after which check-ins are "late"
+	cutoffHour int         // local hour after which check-ins are "late"
+	office     OfficeConfig // geofence: office point + allowed radius
 }
 
 // NewAttendanceService creates an AttendanceService.
-func NewAttendanceService(repo domain.AttendanceRepository, cutoffHour int) *AttendanceService {
-	return &AttendanceService{repo: repo, cutoffHour: cutoffHour}
+func NewAttendanceService(repo domain.AttendanceRepository, cutoffHour int, office OfficeConfig) *AttendanceService {
+	return &AttendanceService{repo: repo, cutoffHour: cutoffHour, office: office}
 }
 
 // CheckIn records a check-in for the user. The second check-in of the same
@@ -55,6 +60,12 @@ func (s *AttendanceService) CheckIn(ctx context.Context, in AttendanceInput) (*d
 		}
 	}
 
+	// Geofence: reject check-ins reported outside the office radius.
+	distM, err := s.office.checkGeofence(in.Latitude, in.Longitude)
+	if err != nil {
+		return nil, err
+	}
+
 	a := &domain.Attendance{
 		UserID:     in.UserID,
 		Type:       domain.AttendanceCheckIn,
@@ -62,8 +73,15 @@ func (s *AttendanceService) CheckIn(ctx context.Context, in AttendanceInput) (*d
 		PhotoPath:  in.PhotoPath,
 		Latitude:   in.Latitude,
 		Longitude:  in.Longitude,
+		Address:    in.Address,
+		Notes:      in.Notes,
+		Device:     in.Device,
+		IPAddress:  in.IPAddress,
 		OccurredAt: now.UTC(),
 		CreatedAt:  time.Now().UTC(),
+	}
+	if in.Latitude != nil && in.Longitude != nil {
+		a.DistanceM = &distM
 	}
 	if err := s.repo.Create(ctx, a); err != nil {
 		return nil, err
@@ -93,6 +111,12 @@ func (s *AttendanceService) CheckOut(ctx context.Context, in AttendanceInput) (*
 		return nil, ErrCheckOutBeforeCheckIn
 	}
 
+	// Geofence applies to check-outs too.
+	distM, err := s.office.checkGeofence(in.Latitude, in.Longitude)
+	if err != nil {
+		return nil, err
+	}
+
 	a := &domain.Attendance{
 		UserID:     in.UserID,
 		Type:       domain.AttendanceCheckOut,
@@ -100,8 +124,15 @@ func (s *AttendanceService) CheckOut(ctx context.Context, in AttendanceInput) (*
 		PhotoPath:  in.PhotoPath,
 		Latitude:   in.Latitude,
 		Longitude:  in.Longitude,
+		Address:    in.Address,
+		Notes:      in.Notes,
+		Device:     in.Device,
+		IPAddress:  in.IPAddress,
 		OccurredAt: now.UTC(),
 		CreatedAt:  time.Now().UTC(),
+	}
+	if in.Latitude != nil && in.Longitude != nil {
+		a.DistanceM = &distM
 	}
 	if err := s.repo.Create(ctx, a); err != nil {
 		return nil, err

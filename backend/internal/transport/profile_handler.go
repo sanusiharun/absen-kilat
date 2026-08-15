@@ -136,5 +136,7 @@ func profileResponse(u *domain.User) map[string]any {
 		"avatar_url":           u.AvatarPath,
 		"is_email_verified":    u.IsEmailVerified,
 		"notification_enabled": u.NotificationEnabled,
+		"role":                 u.Role,
+		"is_active":            u.IsActive,
 	}
 }
