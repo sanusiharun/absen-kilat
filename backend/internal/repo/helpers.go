@@ -40,6 +40,14 @@ func nullString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
+// nullTimeT converts a *time.Time to sql.NullTime.
+func nullTimeT(t *time.Time) sql.NullTime {
+	if t == nil {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: *t, Valid: true}
+}
+
 // nullTime converts a *time.Time to a nullable RFC3339 string.
 func nullTime(t *time.Time) sql.NullString {
 	if t == nil {

@@ -35,6 +35,8 @@ type userDAO struct {
 	JoinDate            string
 	ManagerID           sql.NullString
 	EmployeeCode        string
+	LeaveQuota          int
+	LeaveUsed           int
 	CreatedAt           string
 	UpdatedAt           string
 }
@@ -52,6 +54,7 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 const userCols = `id, email, password_hash, name, avatar_path,
 	is_email_verified, notification_enabled, role, is_active,
 	nip, phone, department, position, address, join_date, manager_id, employee_code,
+	leave_quota, leave_used,
 	created_at, updated_at`
 
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
@@ -72,13 +75,15 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 		INSERT INTO users (id, email, password_hash, name, avatar_path,
 			is_email_verified, notification_enabled, role, is_active,
 			nip, phone, department, position, address, join_date, manager_id, employee_code,
+			leave_quota, leave_used,
 			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.ID, u.Email, u.PasswordHash, u.Name, u.AvatarPath,
 		boolToInt(u.IsEmailVerified), boolToInt(u.NotificationEnabled),
 		string(u.Role), boolToInt(u.IsActive),
 		u.NIP, u.Phone, u.Department, u.Position, u.Address, u.JoinDate,
 		nullString(u.ManagerID), u.EmployeeCode,
+		u.LeaveQuota, u.LeaveUsed,
 		formatTime(u.CreatedAt), formatTime(u.UpdatedAt),
 	)
 	if err != nil {
@@ -142,6 +147,7 @@ func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 			is_email_verified = ?, notification_enabled = ?, role = ?, is_active = ?,
 			nip = ?, phone = ?, department = ?, position = ?, address = ?,
 			join_date = ?, manager_id = ?, employee_code = ?,
+			leave_quota = ?, leave_used = ?,
 			updated_at = ?
 		WHERE id = ?`,
 		u.PasswordHash, u.Name, u.AvatarPath,
@@ -149,6 +155,7 @@ func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 		string(u.Role), boolToInt(u.IsActive),
 		u.NIP, u.Phone, u.Department, u.Position, u.Address, u.JoinDate,
 		nullString(u.ManagerID), u.EmployeeCode,
+		u.LeaveQuota, u.LeaveUsed,
 		formatTime(u.UpdatedAt), u.ID,
 	)
 	if err != nil {
@@ -246,6 +253,7 @@ func scanUser(row *sql.Row) (*domain.User, error) {
 		&d.IsEmailVerified, &d.NotificationEnabled, &d.Role, &d.IsActive,
 		&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
 		&d.ManagerID, &d.EmployeeCode,
+		&d.LeaveQuota, &d.LeaveUsed,
 		&d.CreatedAt, &d.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -276,6 +284,8 @@ func userFromDAO(d userDAO) domain.User {
 		Address:             d.Address,
 		JoinDate:            d.JoinDate,
 		EmployeeCode:        d.EmployeeCode,
+		LeaveQuota:          d.LeaveQuota,
+		LeaveUsed:           d.LeaveUsed,
 		CreatedAt:           parseTime(d.CreatedAt),
 		UpdatedAt:           parseTime(d.UpdatedAt),
 	}

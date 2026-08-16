@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -71,6 +72,13 @@ func main() {
 	appSvc := service.NewAppService(settingsSvc, locationRepo)
 	geocodeSvc := service.NewGeocodeService()
 
+	// Leave (cuti) module. Workdays come from settings (["mon".."sun"]).
+	leaveRepo := repo.NewLeaveRepository(pool)
+	leaveTypeRepo := repo.NewLeaveTypeRepository(pool)
+	leaveWorkdays := parseWorkdays(settingsSvc, ctx)
+	leaveSvc := service.NewLeaveService(leaveRepo, leaveTypeRepo, userRepo, leaveWorkdays)
+	leaveHandler := transport.NewLeaveHandler(leaveSvc, profileSvc, userRepo, settingsRepo)
+
 	// Seed the initial admin account when configured.
 	if cfg.AdminPassword != "" {
 		if err := adminSvc.SeedAdmin(ctx, cfg.AdminPassword); err != nil {
@@ -128,12 +136,14 @@ func main() {
 			notificationHandler.RegisterRoutes(r)
 			geocodeHandler.RegisterRoutes(r)
 			appInfoHandler.RegisterRoutes(r)
+			leaveHandler.RegisterRoutes(r)
 
 			// Admin dashboard: auth + role check (super_admin | hr).
 			r.Group(func(r chi.Router) {
 				r.Use(transport.RequireRole(profileSvc, domain.RoleSuperAdmin, domain.RoleHR))
-				adminHandler.RegisterRoutes(r)
+				adminHandler.RegisterApprovalRoutes(r)
 				qrHandler.RegisterRoutes(r)
+				leaveHandler.RegisterAdminRoutes(r)
 			})
 
 			// Approval queue: supervisors see/decide their own team;
@@ -192,4 +202,28 @@ func newLogger(env string) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stdout, opts))
+}
+
+// parseWorkdays reads working weekdays from settings (["mon".."sun"]) and maps
+// them to time.Weekday values. Falls back to Mon-Fri when unset/invalid.
+func parseWorkdays(s *service.SettingsService, ctx context.Context) []time.Weekday {
+	def := []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday}
+	st, err := s.Get(ctx)
+	if err != nil || len(st.Workdays) == 0 {
+		return def
+	}
+	lookup := map[string]time.Weekday{
+		"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday,
+		"thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday,
+	}
+	out := make([]time.Weekday, 0, len(st.Workdays))
+	for _, w := range st.Workdays {
+		if d, ok := lookup[strings.ToLower(strings.TrimSpace(w))]; ok {
+			out = append(out, d)
+		}
+	}
+	if len(out) == 0 {
+		return def
+	}
+	return out
 }

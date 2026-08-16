@@ -19,6 +19,47 @@ const (
 	RoleEmployee   UserRole = "employee"
 )
 
+// LeaveType is a master leave category (annual/sick/emergency/maternity/paternity).
+type LeaveType struct {
+	ID             string
+	Code           string // annual | sick | emergency | maternity | paternity
+	Name           string
+	DefaultDays    int
+	MaxExtraDays   int // paternity 3/5/7 option
+	RequiresAttachment bool
+	Active         bool
+	CreatedAt      time.Time
+}
+
+// LeaveStatus is the lifecycle of a leave request.
+type LeaveStatus string
+
+const (
+	LeavePending   LeaveStatus = "pending"
+	LeaveApproved  LeaveStatus = "approved"
+	LeaveRejected  LeaveStatus = "rejected"
+	LeaveCancelled LeaveStatus = "cancelled"
+)
+
+// Leave is an employee leave request.
+type Leave struct {
+	ID              string
+	UserID          string
+	LeaveType       string // leave_types.code
+	StartDate       string // YYYY-MM-DD
+	EndDate         string // YYYY-MM-DD
+	TotalDays       int    // working days
+	Reason          string
+	Status          LeaveStatus
+	ApprovedBy      string
+	ApprovedAt      *time.Time
+	RejectionReason string
+	ExtraDays       int // paternity 3/5/7
+	AttachmentPath  string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 // User is an application user who records attendances.
 type User struct {
 	ID                  string
@@ -31,7 +72,7 @@ type User struct {
 	Role                UserRole
 	IsActive            bool
 	// Profile fields (migration 006): employee identity & hierarchy.
-	NIP          string // nomor induk pegawai
+	NIP          string
 	Phone        string
 	Department   string
 	Position     string
@@ -39,6 +80,9 @@ type User struct {
 	JoinDate     string // YYYY-MM-DD
 	ManagerID    string // supervisor (users.id); "" when none
 	EmployeeCode string // unique identifier (QR/manual attendance)
+	// Leave quota (migration 008): English column names.
+	LeaveQuota  int // annual allocation
+	LeaveUsed   int // consumed working days
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -223,7 +267,32 @@ type QrTokenRepository interface {
 	SetActive(ctx context.Context, id string, active bool) error
 }
 
-// SettingsRepository persists key/value system settings.
+// LeaveRepository persists leave requests.
+type LeaveRepository interface {
+	// Create inserts a new leave request (status defaults to pending).
+	Create(ctx context.Context, l *Leave) error
+	// FindByID returns the leave with the given id, or ErrNotFound.
+	FindByID(ctx context.Context, id string) (*Leave, error)
+	// List returns leave requests filtered by status and/or userID.
+	// Empty status/userID means "all". Ordered by created_at DESC.
+	List(ctx context.Context, status, userID string) ([]Leave, error)
+	// ListOverlapping returns pending/approved leaves for a user whose date
+	// range intersects [start, end] (for overlap validation).
+	ListOverlapping(ctx context.Context, userID, start, end string) ([]Leave, error)
+	// CountApprovedDays sums total_days of approved leaves for a user within the
+	// current year (used for annual quota checks). Empty leaveType = all types.
+	CountApprovedDays(ctx context.Context, userID, leaveType string) (int, error)
+	// UpdateStatus approves/rejects/cancels a leave.
+	UpdateStatus(ctx context.Context, id, status, actorID, rejectionReason string, approvedAt *time.Time) error
+	// SetAttachment stores the attachment path (used during create).
+	SetAttachment(ctx context.Context, id, path string) error
+}
+
+// LeaveTypeRepository persists leave type master data.
+type LeaveTypeRepository interface {
+	ListActive(ctx context.Context) ([]LeaveType, error)
+	FindByCode(ctx context.Context, code string) (*LeaveType, error)
+}
 type SettingsRepository interface {
 	// All returns every settings key/value pair.
 	All(ctx context.Context) (map[string]string, error)
