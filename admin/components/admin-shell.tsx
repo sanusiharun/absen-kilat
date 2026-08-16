@@ -33,6 +33,7 @@ const NAV_UTAMA: NavItem[] = [
   { label: "Device", href: "/device", icon: "device" },
   { label: "Cuti", href: "/cuti", icon: "calendar" },
   { label: "Approval", href: "/approval", icon: "check-list" },
+  { label: "Profil", href: "/akun-admin", icon: "user" },
 ];
 
 const NAV_PENGATURAN: NavItem[] = [
@@ -56,6 +57,7 @@ function navForRole(role: string | null): NavItem[] {
         { label: "Cuti", href: "/cuti", icon: "calendar" },
         { label: "Absensi", href: "/absensi", icon: "calendar-check" },
         { label: "Laporan", href: "/laporan", icon: "chart-bar" },
+        { label: "Profil", href: "/akun-admin", icon: "user" },
       ];
     default:
       // role belum termuat / employee / tak dikenal

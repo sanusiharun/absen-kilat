@@ -80,7 +80,7 @@ export default function AkunAdminPage() {
   };
 
   return (
-    <AdminShell title="Akun Admin" subtitle="Profil dan pengaturan keamanan akun">
+    <AdminShell title="Profil" subtitle="Profil dan pengaturan keamanan akun">
       <ErrorBanner message={error} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
