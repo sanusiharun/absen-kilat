@@ -131,7 +131,7 @@ func (r *UserRepository) ListByManager(ctx context.Context, managerID string) ([
 		if err := rows.Scan(&d.ID, &d.Email, &d.PasswordHash, &d.Name, &d.AvatarPath,
 			&d.IsEmailVerified, &d.NotificationEnabled, &d.Role, &d.IsActive,
 			&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
-			&d.ManagerID, &d.EmployeeCode,
+			&d.ManagerID, &d.EmployeeCode, &d.LeaveQuota, &d.LeaveUsed,
 			&d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("repo.UserRepository.ListByManager: scan: %w", err)
 		}
@@ -237,7 +237,7 @@ func (r *UserRepository) ListFiltered(ctx context.Context, search, status string
 		if err := rows.Scan(&d.ID, &d.Email, &d.PasswordHash, &d.Name, &d.AvatarPath,
 			&d.IsEmailVerified, &d.NotificationEnabled, &d.Role, &d.IsActive,
 			&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
-			&d.ManagerID, &d.EmployeeCode,
+			&d.ManagerID, &d.EmployeeCode, &d.LeaveQuota, &d.LeaveUsed,
 			&d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("repo.UserRepository.ListFiltered: scan: %w", err)
 		}

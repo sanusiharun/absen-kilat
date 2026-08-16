@@ -141,6 +141,7 @@ func main() {
 			// Admin dashboard: auth + role check (super_admin | hr).
 			r.Group(func(r chi.Router) {
 				r.Use(transport.RequireRole(profileSvc, domain.RoleSuperAdmin, domain.RoleHR))
+				adminHandler.RegisterRoutes(r)
 				adminHandler.RegisterApprovalRoutes(r)
 				qrHandler.RegisterRoutes(r)
 				leaveHandler.RegisterAdminRoutes(r)
