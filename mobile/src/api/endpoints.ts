@@ -118,3 +118,40 @@ export const notificationApi = {
   markRead: (id: string) => api.post<{ ok: boolean }>(`/notifications/${id}/read`),
   markAllRead: () => api.post<{ ok: boolean }>('/notifications/read-all'),
 };
+
+// Modul Cuti (leave management).
+export interface LeaveType {
+  code: string;
+  name: string;
+  default_days: number;
+  max_extra_days: number;
+}
+
+export interface Leave {
+  id: string;
+  user_id: string;
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  total_days: number;
+  reason?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  approved_by?: string;
+  approved_at?: string;
+  rejection_reason?: string;
+  attachment_url?: string;
+  created_at: string;
+}
+
+export const leaveApi = {
+  types: () => api.get<{ leave_types: LeaveType[] }>('/leave/types'),
+  list: () => api.get<{ leaves: Leave[] }>('/leave'),
+  apply: (body: {
+    leave_type: string;
+    start_date: string;
+    end_date: string;
+    reason?: string;
+    extra_days?: number;
+  }) => api.post<{ leave: Leave }>('/leave', body),
+  cancel: (id: string) => api.post<{ leave: Leave }>(`/leave/${id}/cancel`),
+};

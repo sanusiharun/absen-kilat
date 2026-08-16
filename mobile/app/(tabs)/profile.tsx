@@ -229,6 +229,13 @@ export default function ProfileScreen() {
         <MenuDivider />
 
         <MenuRow icon="information-circle-outline" label="Tentang Aplikasi" onPress={showAbout} />
+        <MenuDivider />
+
+        <MenuRow
+          icon="calendar-outline"
+          label="Cuti Saya"
+          onPress={() => router.push('/cuti')}
+        />
       </View>
 
       {/* Logout */}
