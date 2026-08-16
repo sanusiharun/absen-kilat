@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -43,6 +44,14 @@ type AdminUser = {
   avatar_url?: string;
   created_at?: string;
 };
+type LeavePending = {
+  id: string;
+  user_name: string;
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+};
 
 const PRIMARY = "#6366f1";
 const BLUE = "#3b82f6";
@@ -64,6 +73,7 @@ export default function DashboardPage() {
   const [trends, setTrends] = useState<Trend[]>([]);
   const [locs, setLocs] = useState<Loc[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [leaves, setLeaves] = useState<LeavePending[]>([]);
   const [error, setError] = useState("");
   const [days, setDays] = useState(7);
 
@@ -74,16 +84,18 @@ export default function DashboardPage() {
     }
     setError("");
     try {
-      const [s, t, l, u] = await Promise.all([
+      const [s, t, l, u, lv] = await Promise.all([
         api<Stats>("/admin/stats"),
         api<{ trends: Trend[] }>(`/admin/trends?days=${days}`),
         api<{ locations: Loc[] }>("/admin/locations"),
         api<{ users: AdminUser[] }>("/admin/users"),
+        api<{ leaves: LeavePending[] }>("/admin/leave/pending").catch(() => ({ leaves: [] })),
       ]);
       setStats(s);
       setTrends(t.trends);
       setLocs(l.locations);
       setUsers(u.users);
+      setLeaves(lv.leaves);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat data");
       if (err instanceof Error && err.message.includes("401")) {
@@ -175,6 +187,45 @@ export default function DashboardPage() {
           tone="pink"
         />
       </div>
+
+      {/* Cuti widget */}
+      <Link
+        href="/cuti"
+        className="mb-6 flex flex-col gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 transition-colors hover:bg-slate-50 dark:bg-slate-900 dark:ring-slate-800 dark:hover:bg-slate-800/60 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+            <Icon name="calendar" className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="text-sm font-medium text-slate-600 dark:text-slate-300">Pengajuan Cuti</div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-3xl font-bold leading-none text-slate-900 dark:text-slate-100">
+                {leaves.length}
+              </span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">menunggu persetujuan</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {leaves.slice(0, 3).map((lv) => (
+            <span
+              key={lv.id}
+              className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+              {lv.user_name}
+            </span>
+          ))}
+          {leaves.length > 3 && (
+            <span className="text-xs text-slate-400 dark:text-slate-500">+{leaves.length - 3} lainnya</span>
+          )}
+          <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 dark:border-slate-700 dark:text-indigo-400 dark:hover:bg-indigo-500/10">
+            Kelola Cuti
+            <Icon name="chevron-down" className="h-3.5 w-3.5" />
+          </span>
+        </div>
+      </Link>
 
       {/* Charts row */}
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">

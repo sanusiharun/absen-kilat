@@ -37,7 +37,6 @@ const NAV_UTAMA: NavItem[] = [
 
 const NAV_PENGATURAN: NavItem[] = [
   { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
-  { label: "Akun Admin", href: "/akun-admin", icon: "user" },
 ];
 
 // Role -> menu yang boleh dilihat. Role tak dikenal / employee => akses ditolak.
@@ -181,14 +180,28 @@ export default function AdminShell({
               <div className="mb-1.5 mt-5 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 Pengaturan
               </div>
-              {NAV_PENGATURAN.map(navLink)}
+              <Link
+                key="/pengaturan"
+                href="/pengaturan"
+                className={`mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                  isActive("/pengaturan")
+                    ? "bg-indigo-50 font-semibold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400"
+                    : "font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                }`}
+              >
+                <Icon name="settings" className="h-[18px] w-[18px]" />
+                Pengaturan
+              </Link>
             </>
           )}
         </nav>
 
-        {/* Admin profile */}
+        {/* Account info section (clickable -> profil login) + logout */}
         <div className="border-t border-slate-100 p-4 dark:border-slate-800">
-          <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+          <Link
+            href="/akun-admin"
+            className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 transition-colors hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700"
+          >
             <Avatar name={me?.name || "Admin"} src={me?.avatar_url} size="h-10 w-10 text-sm" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -198,13 +211,16 @@ export default function AdminShell({
             </div>
             <button
               type="button"
-              onClick={logout}
+              onClick={(e) => {
+                e.preventDefault();
+                logout();
+              }}
               title="Keluar"
               className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-slate-200"
             >
               <Icon name="logout" className="h-4 w-4" />
             </button>
-          </div>
+          </Link>
         </div>
       </aside>
 

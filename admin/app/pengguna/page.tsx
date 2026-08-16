@@ -105,6 +105,17 @@ export default function PenggunaPage() {
     load();
   }, [load]);
 
+  // Scroll-lock body saat modal edit terbuka (cegah background scroll)
+  useEffect(() => {
+    if (editUser) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [editUser]);
+
   async function updateUser(id: string, patch: Record<string, unknown>) {
     if (busy.current.has(id)) return;
     busy.current.add(id);
