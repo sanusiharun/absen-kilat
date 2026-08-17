@@ -80,14 +80,13 @@ export default function AdminShell({
   const router = useRouter();
   const { theme, toggle } = useTheme();
   const [me, setMe] = useState<Me | null>(null);
-  const [role, setRole] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem(ROLE_KEY);
-  });
+  const [role, setRole] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const loadMe = useCallback(async () => {
     if (!getToken()) {
       router.replace("/login");
+      setLoading(false);
       return;
     }
     try {
@@ -101,9 +100,12 @@ export default function AdminShell({
       if (err instanceof Error && /401|403/.test(err.message)) {
         clearToken();
         router.replace("/login");
+        setLoading(false);
         return;
       }
       setMe(null);
+    } finally {
+      setLoading(false);
     }
   }, [router]);
 
