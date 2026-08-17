@@ -1,0 +1,10 @@
+:80 {
+	# Admin dashboard (Next.js dev) di /admin
+	handle_path /admin/* {
+		reverse_proxy localhost:3000
+	}
+
+	# Default: static site pribadi
+	root * /usr/share/caddy
+	file_server
+}
