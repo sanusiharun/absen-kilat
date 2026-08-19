@@ -1,0 +1,26 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://nominations-xbox-events-saved.trycloudflare.com/rag/query",
+        "sendHeaders": false,
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "{\"q\":\"flow approval cuti\",\"project\":\"absen-kilat\",\"root\":\"/home/ubuntu/absen-kilat\",\"top_k\":3}",
+        "options": {}
+      },
+      "id": "rag-test-1",
+      "name": "RAG Query Test",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [400, 300]
+    }
+  ],
+  "connections": {},
+  "pinData": {},
+  "meta": {
+    "instanceId": "rag-n8n-test"
+  }
+}

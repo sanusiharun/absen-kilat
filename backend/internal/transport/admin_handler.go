@@ -21,6 +21,7 @@ type adminService interface {
 	UpdateUser(ctx context.Context, targetID, actorID string, up service.UserUpdate) (*domain.User, error)
 	Trends(ctx context.Context, loc *time.Location, days int) ([]service.DayTrend, error)
 	Reports(ctx context.Context, loc *time.Location, days int) ([]service.DayReport, error)
+	UserReports(ctx context.Context, loc *time.Location, days int) ([]service.UserReport, error)
 	Locations(ctx context.Context, limit int) ([]domain.LocationStat, error)
 	ListAttendances(ctx context.Context, f service.AttendanceFilter) ([]service.AdminAttendance, int, error)
 	CreateUser(ctx context.Context, in service.CreateUserInput) (*domain.User, error)
@@ -63,6 +64,7 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	// from the locations CRUD list.
 	r.Get("/admin/locations/breakdown", h.locationsBreakdown)
 	r.Get("/admin/reports", h.reports)
+	r.Get("/admin/reports/users", h.userReports)
 	r.Get("/admin/attendance", h.attendance)
 	r.Patch("/admin/attendance/{id}", h.overrideAttendance)
 	r.Get("/admin/devices", h.devices)
@@ -280,6 +282,18 @@ func (h *AdminHandler) reports(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpx.WriteOK(w, map[string]any{"reports": resp})
+}
+
+// userReports returns the per-user attendance summary ("Laporan per
+// Pengguna") for the dashboard. Accepts ?days= (default 14).
+func (h *AdminHandler) userReports(w http.ResponseWriter, r *http.Request) {
+	days := parseDays(r, 14)
+	reports, err := h.svc.UserReports(r.Context(), time.Local, days)
+	if err != nil {
+		h.ttpxErr(w, err)
+		return
+	}
+	httpx.WriteOK(w, map[string]any{"reports": reports, "days": days})
 }
 
 // locationsBreakdown returns the top attendance addresses (dashboard chart).

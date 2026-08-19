@@ -382,9 +382,74 @@ func (r *AttendanceRepository) ListDevices(ctx context.Context) ([]domain.Device
 	for rows.Next() {
 		var d domain.DeviceStat
 		if err := rows.Scan(&d.Device, &d.Count); err != nil {
-			return nil, fmt.Errorf("repo.AttendanceRepository.ListDevices: scan: %w", err)
+			return nil, fmt.Errorf("repo.AttendanceRepository.ListDevices: %w", err)
 		}
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// UserReportRow is a per-user attendance aggregation over a date window.
+type UserReportRow struct {
+	UserID        string
+	Name          string
+	Email         string
+	Department    string
+	PresentDays   int // distinct dates with a check_in (on_time or late)
+	LateDays      int // distinct dates with a late check_in
+	AbsentDays    int // working days in range minus PresentDays
+	CheckInCount  int
+	CheckOutCount int
+	LastCheckIn   *time.Time
+}
+
+// UserReports aggregates attendance per user across [start, end). It joins the
+// users table for display name/email/department and counts distinct
+// check-in dates as "present days". Absent days = working days in range
+// (calendar days, simplistic) minus present days; negative clamped to 0.
+func (r *AttendanceRepository) UserReports(ctx context.Context, start, end time.Time, workingDays int) ([]UserReportRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT
+			u.id, u.name, u.email, u.department,
+			COUNT(DISTINCT CASE WHEN a.type = 'check_in' AND a.occurred_at >= ? AND a.occurred_at < ? THEN DATE(a.occurred_at) END) AS present_days,
+			COUNT(DISTINCT CASE WHEN a.type = 'check_in' AND a.status = 'late' AND a.occurred_at >= ? AND a.occurred_at < ? THEN DATE(a.occurred_at) END) AS late_days,
+			COUNT(CASE WHEN a.type = 'check_in' THEN 1 END) AS checkin_count,
+			COUNT(CASE WHEN a.type = 'check_out' THEN 1 END) AS checkout_count,
+			MAX(CASE WHEN a.type = 'check_in' THEN a.occurred_at END) AS last_checkin
+		FROM users u
+		LEFT JOIN attendances a ON a.user_id = u.id
+		GROUP BY u.id, u.name, u.email, u.department
+		ORDER BY u.name ASC`,
+		formatTime(start), formatTime(end), formatTime(start), formatTime(end))
+	if err != nil {
+		return nil, fmt.Errorf("repo.AttendanceRepository.UserReports: query: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]UserReportRow, 0)
+	for rows.Next() {
+		var row UserReportRow
+		var lastCheckIn sql.NullString
+		if err := rows.Scan(
+			&row.UserID, &row.Name, &row.Email, &row.Department,
+			&row.PresentDays, &row.LateDays, &row.CheckInCount, &row.CheckOutCount,
+			&lastCheckIn,
+		); err != nil {
+			return nil, fmt.Errorf("repo.AttendanceRepository.UserReports: scan: %w", err)
+		}
+		if lastCheckIn.Valid && lastCheckIn.String != "" {
+			if t, perr := time.Parse(time.RFC3339Nano, lastCheckIn.String); perr == nil {
+				row.LastCheckIn = &t
+			}
+		}
+		if workingDays > 0 {
+			absent := workingDays - row.PresentDays
+			if absent < 0 {
+				absent = 0
+			}
+			row.AbsentDays = absent
+		}
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }

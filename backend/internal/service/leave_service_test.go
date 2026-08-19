@@ -117,7 +117,7 @@ func TestApplyAnnualLeaveWorkdays(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(12)
 	// Mon 2026-08-17 .. Fri 2026-08-21 (5 working days).
-	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-17", EndDate: "2026-08-21", Reason: "liburan"})
+	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-24", EndDate: "2026-08-28", Reason: "liburan"})
 	if err != nil {
 		t.Fatalf("apply failed: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestApplyRejectsWeekendSpanCount(t *testing.T) {
 func TestApplyPaternityDynamic(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(12)
-	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "paternity", StartDate: "2026-08-17", EndDate: "2026-08-17", ExtraDays: 7})
+	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "paternity", StartDate: "2026-08-24", EndDate: "2026-08-24", ExtraDays: 7})
 	if err != nil {
 		t.Fatalf("paternity apply failed: %v", err)
 	}
@@ -154,10 +154,20 @@ func TestApplyPaternityDynamic(t *testing.T) {
 	}
 }
 
+func TestApplyStartInPastRejected(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestLeaveSvc(12)
+	// 2020-01-01 is firmly in the past.
+	_, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2020-01-01", EndDate: "2020-01-05", Reason: "x"})
+	if err == nil {
+		t.Fatal("expected past-start error, got nil")
+	}
+}
+
 func TestApplyQuotaExceeded(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(2) // quota 2 days
-	_, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-17", EndDate: "2026-08-21", Reason: "x"})
+	_, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-24", EndDate: "2026-08-28", Reason: "x"})
 	if err == nil {
 		t.Fatal("expected quota error, got nil")
 	}

@@ -251,6 +251,57 @@ func (s *AdminService) Reports(ctx context.Context, loc *time.Location, days int
 	return out, nil
 }
 
+// UserReport is the per-user attendance summary for the dashboard's
+// "Laporan per Pengguna" view.
+type UserReport struct {
+	UserID        string `json:"user_id"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	Department    string `json:"department"`
+	PresentDays   int    `json:"present_days"`
+	LateDays      int    `json:"late_days"`
+	AbsentDays    int    `json:"absent_days"`
+	CheckInCount  int    `json:"check_in_count"`
+	CheckOutCount int    `json:"check_out_count"`
+	LastCheckIn   *string `json:"last_check_in,omitempty"`
+}
+
+// UserReports aggregates attendance per user over the last `days` calendar
+// days (default 14). Absent days = days in range minus present days.
+func (s *AdminService) UserReports(ctx context.Context, loc *time.Location, days int) ([]UserReport, error) {
+	if days <= 0 {
+		days = 14
+	}
+	now := time.Now().In(loc)
+	end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).Add(24 * time.Hour).UTC()
+	start := end.Add(-time.Duration(days) * 24 * time.Hour)
+
+	rows, err := s.attendances.UserReports(ctx, start, end, days)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UserReport, 0, len(rows))
+	for _, r := range rows {
+		ur := UserReport{
+			UserID:        r.UserID,
+			Name:          r.Name,
+			Email:         r.Email,
+			Department:    r.Department,
+			PresentDays:   r.PresentDays,
+			LateDays:      r.LateDays,
+			AbsentDays:    r.AbsentDays,
+			CheckInCount:  r.CheckInCount,
+			CheckOutCount: r.CheckOutCount,
+		}
+		if r.LastCheckIn != nil {
+			t := r.LastCheckIn.In(loc).Format("2006-01-02 15:04")
+			ur.LastCheckIn = &t
+		}
+		out = append(out, ur)
+	}
+	return out, nil
+}
+
 // Locations returns the top attendance addresses by record count.
 func (s *AdminService) Locations(ctx context.Context, limit int) ([]domain.LocationStat, error) {
 	if limit <= 0 {

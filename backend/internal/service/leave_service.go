@@ -51,6 +51,11 @@ func (s *LeaveService) Apply(ctx context.Context, in LeaveInput) (*domain.Leave,
 	if err != nil {
 		return nil, pkgerrors.Validation("leave", "format tanggal mulai salah (YYYY-MM-DD)")
 	}
+	// Start date must not be in the past.
+	today := time.Now().Format("2006-01-02")
+	if start.Before(time.Now()) && start.Format("2006-01-02") != today {
+		return nil, pkgerrors.Validation("leave", "tanggal mulai tidak boleh di masa lalu")
+	}
 	end, err := time.Parse("2006-01-02", in.EndDate)
 	if err != nil {
 		return nil, pkgerrors.Validation("leave", "format tanggal selesai salah (YYYY-MM-DD)")
