@@ -19,6 +19,18 @@ import { formatDate } from "@/lib/format";
 
 type Report = { date: string; present: number; late: number; absent: number; total: number };
 type Trend = { date: string; present: number; late: number; absent: number };
+type UserReport = {
+  user_id: string;
+  name: string;
+  email: string;
+  department: string;
+  present_days: number;
+  late_days: number;
+  absent_days: number;
+  check_in_count: number;
+  check_out_count: number;
+  last_check_in?: string;
+};
 
 const BLUE = "#3b82f6";
 const ORANGE = "#f59e0b";
@@ -29,6 +41,7 @@ export default function LaporanPage() {
   const [days, setDays] = useState(14);
   const [reports, setReports] = useState<Report[]>([]);
   const [trends, setTrends] = useState<Trend[]>([]);
+  const [userReports, setUserReports] = useState<UserReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -40,12 +53,14 @@ export default function LaporanPage() {
     setLoading(true);
     setError("");
     try {
-      const [r, t] = await Promise.all([
+      const [r, t, u] = await Promise.all([
         api<{ reports: Report[] }>(`/admin/reports?days=${days}`),
         api<{ trends: Trend[] }>(`/admin/trends?days=${days}`),
+        api<{ reports: UserReport[] }>(`/admin/reports/users?days=${days}`),
       ]);
       setReports(r.reports);
       setTrends(t.trends);
+      setUserReports(u.reports);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat laporan");
       if (err instanceof Error && err.message.includes("401")) {
@@ -126,7 +141,7 @@ export default function LaporanPage() {
       </Card>
 
       {/* Daily summary table */}
-      <Card>
+      <Card className="mt-6">
         <CardHeader title="Ringkasan Harian" subtitle={`${days} hari terakhir`} />
         <div className="overflow-x-auto">
           {loading ? (
@@ -177,6 +192,81 @@ export default function LaporanPage() {
                   <tr>
                     <td colSpan={6} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
                       Belum ada data laporan
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+
+      {/* Per-user report table */}
+      <Card className="mt-6">
+        <CardHeader
+          title="Laporan per Pengguna"
+          subtitle={`Rekap kehadiran tiap karyawan (${days} hari terakhir)`}
+        />
+        <div className="overflow-x-auto">
+          {loading ? (
+            <Spinner />
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <th className="px-6 py-3">Nama</th>
+                  <th className="px-6 py-3">Departemen</th>
+                  <th className="px-6 py-3 text-center">Hadir</th>
+                  <th className="px-6 py-3 text-center">Terlambat</th>
+                  <th className="px-6 py-3 text-center">Absen</th>
+                  <th className="px-6 py-3 text-center">Check-in</th>
+                  <th className="px-6 py-3 text-center">Check-out</th>
+                  <th className="px-6 py-3 text-right">Terakhir Absen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {userReports.map((u) => (
+                  <tr
+                    key={u.user_id}
+                    className="border-b border-slate-50 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/40"
+                  >
+                    <td className="px-6 py-3">
+                      <div className="font-medium text-slate-900 dark:text-slate-100">{u.name}</div>
+                      <div className="text-xs text-slate-400 dark:text-slate-500">{u.email}</div>
+                    </td>
+                    <td className="px-6 py-3 text-slate-600 dark:text-slate-300">
+                      {u.department || "-"}
+                    </td>
+                    <td className="px-6 py-3 text-center">
+                      <Pill className="bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400">
+                        {u.present_days}
+                      </Pill>
+                    </td>
+                    <td className="px-6 py-3 text-center">
+                      <Pill className="bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400">
+                        {u.late_days}
+                      </Pill>
+                    </td>
+                    <td className="px-6 py-3 text-center">
+                      <Pill className="bg-pink-100 text-pink-700 dark:bg-pink-500/15 dark:text-pink-400">
+                        {u.absent_days}
+                      </Pill>
+                    </td>
+                    <td className="px-6 py-3 text-center text-slate-600 dark:text-slate-300">
+                      {u.check_in_count}
+                    </td>
+                    <td className="px-6 py-3 text-center text-slate-600 dark:text-slate-300">
+                      {u.check_out_count}
+                    </td>
+                    <td className="px-6 py-3 text-right text-xs font-medium text-slate-600 dark:text-slate-300">
+                      {u.last_check_in || "-"}
+                    </td>
+                  </tr>
+                ))}
+                {userReports.length === 0 && !loading && (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
+                      Belum ada data pengguna
                     </td>
                   </tr>
                 )}
