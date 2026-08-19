@@ -14,7 +14,7 @@ import {
 import { api, clearToken, getToken } from "@/lib/api";
 import AdminShell from "@/components/admin-shell";
 import { Card, CardHeader, Empty, ErrorBanner, LegendRow, Pill, Spinner } from "@/components/ui";
-import { Select } from "@/components/fields";
+import { Select, Input } from "@/components/fields";
 import { formatDate } from "@/lib/format";
 
 type Report = { date: string; present: number; late: number; absent: number; total: number };
@@ -42,6 +42,7 @@ export default function LaporanPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [trends, setTrends] = useState<Trend[]>([]);
   const [userReports, setUserReports] = useState<UserReport[]>([]);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -206,11 +207,30 @@ export default function LaporanPage() {
         <CardHeader
           title="Laporan per Pengguna"
           subtitle={`Rekap kehadiran tiap karyawan (${days} hari terakhir)`}
+          right={
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cari nama atau email..."
+              className="w-56"
+            />
+          }
         />
         <div className="overflow-x-auto">
           {loading ? (
             <Spinner />
           ) : (
+            (() => {
+              const q = search.trim().toLowerCase();
+              const filtered = q
+                ? userReports.filter(
+                    (u) =>
+                      u.name.toLowerCase().includes(q) ||
+                      u.email.toLowerCase().includes(q) ||
+                      (u.department || "").toLowerCase().includes(q),
+                  )
+                : userReports;
+              return (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
@@ -225,7 +245,7 @@ export default function LaporanPage() {
                 </tr>
               </thead>
               <tbody>
-                {userReports.map((u) => (
+                {filtered.map((u) => (
                   <tr
                     key={u.user_id}
                     className="border-b border-slate-50 transition-colors hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/40"
@@ -263,15 +283,17 @@ export default function LaporanPage() {
                     </td>
                   </tr>
                 ))}
-                {userReports.length === 0 && !loading && (
+                {filtered.length === 0 && !loading && (
                   <tr>
                     <td colSpan={8} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
-                      Belum ada data pengguna
+                      {q ? `Tidak ada hasil untuk "${q}"` : "Belum ada data pengguna"}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
+              );
+            })()
           )}
         </div>
       </Card>
