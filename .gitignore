@@ -11,3 +11,6 @@ backend/uploads/
 admin/.next/
 *.tsbuildinfo
 .DS_Store
+
+# Worktree terisolasi worker Hermes Kanban (dibuat otomatis per task)
+.worktrees/
