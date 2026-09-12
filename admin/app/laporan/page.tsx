@@ -15,7 +15,7 @@ import { api, clearToken, getToken } from "@/lib/api";
 import AdminShell from "@/components/admin-shell";
 import { Card, CardHeader, Empty, ErrorBanner, LegendRow, Pill, Spinner } from "@/components/ui";
 import { Select, Input } from "@/components/fields";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatDuration } from "@/lib/format";
 
 type Report = { date: string; present: number; late: number; absent: number; total: number };
 type Trend = { date: string; present: number; late: number; absent: number };
@@ -29,6 +29,8 @@ type UserReport = {
   absent_days: number;
   check_in_count: number;
   check_out_count: number;
+  total_minutes: number;
+  total_hours: number;
   last_check_in?: string;
 };
 
@@ -236,9 +238,10 @@ export default function LaporanPage() {
                 <tr className="border-b border-slate-100 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:text-slate-400">
                   <th className="px-6 py-3">Nama</th>
                   <th className="px-6 py-3">Departemen</th>
-                  <th className="px-6 py-3 text-center">Hadir</th>
+                  <th className="px-6 py-3 text-center">Hari Hadir</th>
                   <th className="px-6 py-3 text-center">Terlambat</th>
                   <th className="px-6 py-3 text-center">Absen</th>
+                  <th className="px-6 py-3 text-center">Total Jam</th>
                   <th className="px-6 py-3 text-center">Check-in</th>
                   <th className="px-6 py-3 text-center">Check-out</th>
                   <th className="px-6 py-3 text-right">Terakhir Absen</th>
@@ -272,6 +275,12 @@ export default function LaporanPage() {
                         {u.absent_days}
                       </Pill>
                     </td>
+                    <td
+                      className="px-6 py-3 text-center font-medium text-slate-600 dark:text-slate-300"
+                      title={`${u.total_hours} jam`}
+                    >
+                      {formatDuration(u.total_minutes)}
+                    </td>
                     <td className="px-6 py-3 text-center text-slate-600 dark:text-slate-300">
                       {u.check_in_count}
                     </td>
@@ -285,7 +294,7 @@ export default function LaporanPage() {
                 ))}
                 {filtered.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={8} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
+                    <td colSpan={9} className="px-6 py-10 text-center text-slate-400 dark:text-slate-500">
                       {q ? `Tidak ada hasil untuk "${q}"` : "Belum ada data pengguna"}
                     </td>
                   </tr>

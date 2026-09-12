@@ -285,7 +285,9 @@ func (h *AdminHandler) reports(w http.ResponseWriter, r *http.Request) {
 }
 
 // userReports returns the per-user attendance summary ("Laporan per
-// Pengguna") for the dashboard. Accepts ?days= (default 14).
+// Pengguna") for the dashboard. Accepts ?days= (default 14). Each row carries
+// present/late/absent days plus total_minutes/total_hours worked in the
+// window, all bounded to the last ?days= calendar days.
 func (h *AdminHandler) userReports(w http.ResponseWriter, r *http.Request) {
 	days := parseDays(r, 14)
 	reports, err := h.svc.UserReports(r.Context(), time.Local, days)

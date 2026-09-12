@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -339,6 +340,90 @@ func TestAdminService_ListAttendances(t *testing.T) {
 	// Invalid date → validation error.
 	if _, _, err = svc.ListAttendances(ctx, AttendanceFilter{From: "not-a-date"}); !pkgerrors.IsValidation(err) {
 		t.Fatalf("bad from date: want validation, got %v", err)
+	}
+}
+
+func TestAdminService_UserReports(t *testing.T) {
+	ctx := context.Background()
+	svc, ur, ar := newAdminTestEnv(t)
+	u1 := addUser(t, ur, "alice@test.dev", domain.RoleEmployee)
+	u2 := addUser(t, ur, "bob@test.dev", domain.RoleEmployee)
+
+	// Fixed noon (local) so records never drift near a UTC/local day boundary.
+	now := time.Now().In(time.Local)
+	day1 := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.Local)
+	day2 := day1.AddDate(0, 0, -1)
+	old := day1.AddDate(0, 0, -40) // outside a 14-day window
+
+	atts := []*domain.Attendance{
+		// alice, day1: 10:00-18:30 → 8h30m present.
+		{UserID: u1.ID, Type: domain.AttendanceCheckIn, Status: domain.StatusOnTime, OccurredAt: day1.Add(-2 * time.Hour)},
+		{UserID: u1.ID, Type: domain.AttendanceCheckOut, Status: domain.StatusOnTime, OccurredAt: day1.Add(6*time.Hour + 30*time.Minute)},
+		// alice, day2: late check-in, no check_out → counted as present/late, 0 minutes.
+		{UserID: u1.ID, Type: domain.AttendanceCheckIn, Status: domain.StatusLate, OccurredAt: day2},
+		// bob, day1: 09:00-17:00 → 8h present.
+		{UserID: u2.ID, Type: domain.AttendanceCheckIn, Status: domain.StatusOnTime, OccurredAt: day1.Add(-3 * time.Hour)},
+		{UserID: u2.ID, Type: domain.AttendanceCheckOut, Status: domain.StatusOnTime, OccurredAt: day1.Add(5 * time.Hour)},
+		// alice, 40 days ago: must not leak into the 14-day window.
+		{UserID: u1.ID, Type: domain.AttendanceCheckIn, Status: domain.StatusOnTime, OccurredAt: old},
+		{UserID: u1.ID, Type: domain.AttendanceCheckOut, Status: domain.StatusOnTime, OccurredAt: old.Add(time.Hour)},
+	}
+	for _, a := range atts {
+		if err := ar.Create(ctx, a); err != nil {
+			t.Fatalf("create attendance: %v", err)
+		}
+	}
+
+	reports, err := svc.UserReports(ctx, time.Local, 14)
+	if err != nil {
+		t.Fatalf("UserReports: %v", err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("want 2 reports, got %d", len(reports))
+	}
+	byEmail := map[string]UserReport{}
+	for _, r := range reports {
+		byEmail[r.Email] = r
+	}
+
+	alice := byEmail["alice@test.dev"]
+	if alice.PresentDays != 2 {
+		t.Errorf("alice present_days = %d, want 2 (distinct dates with a check_in)", alice.PresentDays)
+	}
+	if alice.LateDays != 1 {
+		t.Errorf("alice late_days = %d, want 1", alice.LateDays)
+	}
+	if alice.CheckInCount != 2 || alice.CheckOutCount != 1 {
+		t.Errorf("alice check_in/out = %d/%d, want 2/1 (window-bounded)", alice.CheckInCount, alice.CheckOutCount)
+	}
+	if alice.TotalMinutes != 510 {
+		t.Errorf("alice total_minutes = %d, want 510 (8h30m)", alice.TotalMinutes)
+	}
+	if alice.TotalHours != 8.5 {
+		t.Errorf("alice total_hours = %v, want 8.5", alice.TotalHours)
+	}
+	if alice.AbsentDays != 12 { // 14 working days - 2 present
+		t.Errorf("alice absent_days = %d, want 12", alice.AbsentDays)
+	}
+	if alice.LastCheckIn == nil || !strings.HasPrefix(*alice.LastCheckIn, day1.Format("2006-01-02")) {
+		t.Errorf("alice last_check_in = %v, want today", alice.LastCheckIn)
+	}
+
+	bob := byEmail["bob@test.dev"]
+	if bob.PresentDays != 1 || bob.LateDays != 0 || bob.AbsentDays != 13 {
+		t.Errorf("bob present/late/absent = %d/%d/%d, want 1/0/13", bob.PresentDays, bob.LateDays, bob.AbsentDays)
+	}
+	if bob.TotalMinutes != 480 || bob.TotalHours != 8 {
+		t.Errorf("bob total = %d min / %v h, want 480 / 8", bob.TotalMinutes, bob.TotalHours)
+	}
+
+	// Default window (days <= 0 → 14) still returns both users.
+	reports, err = svc.UserReports(ctx, time.Local, 0)
+	if err != nil {
+		t.Fatalf("UserReports default: %v", err)
+	}
+	if len(reports) != 2 {
+		t.Fatalf("default window: want 2 reports, got %d", len(reports))
 	}
 }
 
