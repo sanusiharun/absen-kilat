@@ -400,6 +400,7 @@ type UserReportRow struct {
 	AbsentDays    int // working days in range minus PresentDays
 	CheckInCount  int
 	CheckOutCount int
+	TotalMinutes  int // sum over days of (last check_out - first check_in)
 	LastCheckIn   *time.Time
 }
 
@@ -407,20 +408,41 @@ type UserReportRow struct {
 // users table for display name/email/department and counts distinct
 // check-in dates as "present days". Absent days = working days in range
 // (calendar days, simplistic) minus present days; negative clamped to 0.
+//
+// Every attendance metric is bounded to [start, end) (check_in/check_out
+// counts included), and total worked minutes are the per-day sum of
+// (last check_out - first check_in); a day without a check_out adds zero.
 func (r *AttendanceRepository) UserReports(ctx context.Context, start, end time.Time, workingDays int) ([]UserReportRow, error) {
 	rows, err := r.db.QueryContext(ctx, `
+		WITH daily AS (
+			SELECT
+				a.user_id AS user_id,
+				DATE(a.occurred_at) AS day,
+				COUNT(CASE WHEN a.type = 'check_in' THEN 1 END) AS ins,
+				COUNT(CASE WHEN a.type = 'check_out' THEN 1 END) AS outs,
+				MAX(CASE WHEN a.type = 'check_in' AND a.status = 'late' THEN 1 ELSE 0 END) AS late_ins,
+				MIN(CASE WHEN a.type = 'check_in' THEN a.occurred_at END) AS first_in,
+				MAX(CASE WHEN a.type = 'check_out' THEN a.occurred_at END) AS last_out
+			FROM attendances a
+			WHERE a.occurred_at >= ? AND a.occurred_at < ?
+			GROUP BY a.user_id, DATE(a.occurred_at)
+		)
 		SELECT
 			u.id, u.name, u.email, u.department,
-			COUNT(DISTINCT CASE WHEN a.type = 'check_in' AND a.occurred_at >= ? AND a.occurred_at < ? THEN DATE(a.occurred_at) END) AS present_days,
-			COUNT(DISTINCT CASE WHEN a.type = 'check_in' AND a.status = 'late' AND a.occurred_at >= ? AND a.occurred_at < ? THEN DATE(a.occurred_at) END) AS late_days,
-			COUNT(CASE WHEN a.type = 'check_in' THEN 1 END) AS checkin_count,
-			COUNT(CASE WHEN a.type = 'check_out' THEN 1 END) AS checkout_count,
-			MAX(CASE WHEN a.type = 'check_in' THEN a.occurred_at END) AS last_checkin
+			COALESCE(SUM(CASE WHEN d.ins > 0 THEN 1 ELSE 0 END), 0) AS present_days,
+			COALESCE(SUM(d.late_ins), 0) AS late_days,
+			COALESCE(SUM(d.ins), 0) AS checkin_count,
+			COALESCE(SUM(d.outs), 0) AS checkout_count,
+			COALESCE(CAST(ROUND(SUM(CASE
+				WHEN d.first_in IS NOT NULL AND d.last_out IS NOT NULL AND d.last_out > d.first_in
+				THEN (julianday(d.last_out) - julianday(d.first_in)) * 1440
+				ELSE 0 END)) AS INTEGER), 0) AS total_minutes,
+			MAX(CASE WHEN d.ins > 0 THEN d.first_in END) AS last_checkin
 		FROM users u
-		LEFT JOIN attendances a ON a.user_id = u.id
+		LEFT JOIN daily d ON d.user_id = u.id
 		GROUP BY u.id, u.name, u.email, u.department
 		ORDER BY u.name ASC`,
-		formatTime(start), formatTime(end), formatTime(start), formatTime(end))
+		formatTime(start), formatTime(end))
 	if err != nil {
 		return nil, fmt.Errorf("repo.AttendanceRepository.UserReports: query: %w", err)
 	}
@@ -433,7 +455,7 @@ func (r *AttendanceRepository) UserReports(ctx context.Context, start, end time.
 		if err := rows.Scan(
 			&row.UserID, &row.Name, &row.Email, &row.Department,
 			&row.PresentDays, &row.LateDays, &row.CheckInCount, &row.CheckOutCount,
-			&lastCheckIn,
+			&row.TotalMinutes, &lastCheckIn,
 		); err != nil {
 			return nil, fmt.Errorf("repo.AttendanceRepository.UserReports: scan: %w", err)
 		}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -254,15 +255,17 @@ func (s *AdminService) Reports(ctx context.Context, loc *time.Location, days int
 // UserReport is the per-user attendance summary for the dashboard's
 // "Laporan per Pengguna" view.
 type UserReport struct {
-	UserID        string `json:"user_id"`
-	Name          string `json:"name"`
-	Email         string `json:"email"`
-	Department    string `json:"department"`
-	PresentDays   int    `json:"present_days"`
-	LateDays      int    `json:"late_days"`
-	AbsentDays    int    `json:"absent_days"`
-	CheckInCount  int    `json:"check_in_count"`
-	CheckOutCount int    `json:"check_out_count"`
+	UserID        string  `json:"user_id"`
+	Name          string  `json:"name"`
+	Email         string  `json:"email"`
+	Department    string  `json:"department"`
+	PresentDays   int     `json:"present_days"`
+	LateDays      int     `json:"late_days"`
+	AbsentDays    int     `json:"absent_days"`
+	CheckInCount  int     `json:"check_in_count"`
+	CheckOutCount int     `json:"check_out_count"`
+	TotalMinutes  int     `json:"total_minutes"`
+	TotalHours    float64 `json:"total_hours"`
 	LastCheckIn   *string `json:"last_check_in,omitempty"`
 }
 
@@ -292,6 +295,8 @@ func (s *AdminService) UserReports(ctx context.Context, loc *time.Location, days
 			AbsentDays:    r.AbsentDays,
 			CheckInCount:  r.CheckInCount,
 			CheckOutCount: r.CheckOutCount,
+			TotalMinutes:  r.TotalMinutes,
+			TotalHours:    math.Round(float64(r.TotalMinutes)/60*100) / 100,
 		}
 		if r.LastCheckIn != nil {
 			t := r.LastCheckIn.In(loc).Format("2006-01-02 15:04")
