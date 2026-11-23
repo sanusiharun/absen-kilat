@@ -84,6 +84,13 @@ func main() {
 	overtimeSvc := service.NewOvertimeService(overtimeRepo)
 	overtimeHandler := transport.NewOvertimeHandler(overtimeSvc)
 
+	// Mitra (partner crew) + Proyek/Kapal + Penugasan master data.
+	partnerRepo := repo.NewPartnerRepository(pool)
+	projectRepo := repo.NewProjectRepository(pool)
+	assignmentRepo := repo.NewAssignmentRepository(pool)
+	projectSvc := service.NewProjectService(partnerRepo, projectRepo, assignmentRepo, userRepo)
+	projectHandler := transport.NewProjectHandler(projectSvc)
+
 	// Seed the initial admin account when configured.
 	if cfg.AdminPassword != "" {
 		if err := adminSvc.SeedAdmin(ctx, cfg.AdminPassword); err != nil {
@@ -143,6 +150,7 @@ func main() {
 			appInfoHandler.RegisterRoutes(r)
 			leaveHandler.RegisterRoutes(r)
 			overtimeHandler.RegisterRoutes(r)
+			projectHandler.RegisterRoutes(r)
 
 			// Admin dashboard: auth + role check (super_admin | hr).
 			r.Group(func(r chi.Router) {
@@ -152,6 +160,7 @@ func main() {
 				qrHandler.RegisterRoutes(r)
 				leaveHandler.RegisterAdminRoutes(r)
 				overtimeHandler.RegisterAdminRoutes(r)
+				projectHandler.RegisterAdminRoutes(r)
 			})
 
 			// Approval queue: supervisors see/decide their own team;

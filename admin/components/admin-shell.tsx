@@ -33,6 +33,7 @@ const NAV_UTAMA: NavItem[] = [
   { label: "Device", href: "/device", icon: "device" },
   { label: "Cuti", href: "/cuti", icon: "calendar" },
   { label: "Lembur", href: "/lembur", icon: "calendar-check" },
+  { label: "Proyek & Mitra", href: "/proyek", icon: "map-pin" },
   { label: "Approval", href: "/approval", icon: "check-list" },
   { label: "Profil", href: "/akun-admin", icon: "user" },
 ];
