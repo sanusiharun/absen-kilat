@@ -280,6 +280,13 @@ export default function HomeScreen() {
             <Text style={styles.quickTitle}>Riwayat Absen</Text>
             <Text style={styles.quickSub}>Lihat riwayat</Text>
           </Pressable>
+          <Pressable style={styles.quickCard} onPress={() => router.push('/cuti')}>
+            <View style={[styles.quickIcon, { backgroundColor: colors.warningSoft }]}>
+              <Ionicons name="airplane-outline" size={22} color={colors.warning} />
+            </View>
+            <Text style={styles.quickTitle}>Cuti & Izin</Text>
+            <Text style={styles.quickSub}>Ajukan / riwayat</Text>
+          </Pressable>
           <Pressable style={styles.quickCard} onPress={() => router.push('/(tabs)/profile')}>
             <View style={[styles.quickIcon, { backgroundColor: colors.primarySoft }]}>
               <Ionicons name="person-outline" size={22} color={colors.primary} />
