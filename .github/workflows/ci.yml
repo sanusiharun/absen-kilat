@@ -37,6 +37,9 @@ jobs:
       # membawa tarball rusak, jadi cache dimatikan dan cache lokal dibersihkan.
       - name: install (npm ci)
         run: |
+          # npm 10.9.x termasuk versi yang kena bug 'Exit handler never called!'
+          # di runner (npm/cli#7666); 10.8.1 dipakai sebagai pembanding.
+          npm i -g npm@10.8.1
           npm cache clean --force
           npm ci --no-audit --no-fund --foreground-scripts
       # Diagnosis otomatis kalau install gagal: versi runtime, log debug npm
@@ -46,8 +49,10 @@ jobs:
         if: failure()
         run: |
           echo "node=$(node -v) npm=$(npm -v) registry=$(npm config get registry)"
-          ls -la /home/runner/.npm/_logs/ 2>/dev/null || true
-          tail -n 200 "$(ls -t /home/runner/.npm/_logs/*-debug-0.log 2>/dev/null | head -1)" || true
+          # ambil log TERBESAR (log npm ci), bukan log 'npm config get' yang kecil
+          LOG=$(ls -S /home/runner/.npm/_logs/*-debug-0.log 2>/dev/null | head -1)
+          echo "debug-log=$LOG ($(wc -l < "$LOG" 2>/dev/null) baris)"
+          tail -n 250 "$LOG" 2>/dev/null || true
           df -h . ; free -m
       - run: npm run lint -- --max-warnings=0
       - run: npm run build
