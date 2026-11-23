@@ -23,35 +23,25 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    # npm di runner hosted gagal dengan 'Exit handler never called!' bahkan di
+    # Node 20 (bahkan `npm cache clean --force` pun crash), jadi langkah ini
+    # dijalankan di image node resmi yang isinya sama dengan mesin dev:
+    # Node 22.23.1 + npm 10.9.8, tempat `npm ci` terbukti bersih.
+    container: node:22.23.1-bookworm
     defaults:
       run:
         working-directory: admin
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          # Node 20 dipakai karena regresi npm 'Exit handler never called!'
-          # menyerang Node 22/24/25 di runner (npm/cli#7666, nodejs/node#53904);
-          # di Node 20 dengan konfigurasi yang sama install-nya bersih.
-          # Next 16.3.1 hanya butuh >= 20.9.0, jadi ini aman.
-          node-version: "20"
-      # `npm ci` di runner gagal 'Exit handler never called!' setelah ~70 detik
-      # padahal lokal bersih. Cache npm dari actions/setup-node dicurigai
-      # membawa tarball rusak, jadi cache dimatikan dan cache lokal dibersihkan.
+      - name: versions
+        run: node -v && npm -v
       - name: install (npm ci)
-        run: |
-          npm cache clean --force
-          npm ci --no-audit --no-fund --foreground-scripts
-      # Diagnosis otomatis kalau install gagal: versi runtime, log debug npm
-      # (baris di atas 'Exit handler never called' biasanya menyebut penyebab
-      # sebenarnya), plus disk/RAM runner.
+        run: npm ci --no-audit --no-fund
       - name: npm diagnostics on failure
         if: failure()
         run: |
-          echo "node=$(node -v) npm=$(npm -v) registry=$(npm config get registry)"
-          # ambil log TERBESAR (log npm ci), bukan log 'npm config get' yang kecil
-          LOG=$(ls -S /home/runner/.npm/_logs/*-debug-0.log 2>/dev/null | head -1)
-          echo "debug-log=$LOG ($(wc -l < "$LOG" 2>/dev/null) baris)"
+          LOG=$(ls -S "$(npm config get cache)/_logs"/*-debug-0.log 2>/dev/null | head -1)
+          echo "debug-log=$LOG"
           tail -n 250 "$LOG" 2>/dev/null || true
           df -h . ; free -m
       - run: npm run lint -- --max-warnings=0
