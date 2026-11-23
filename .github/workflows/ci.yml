@@ -23,26 +23,26 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    # npm di runner hosted gagal dengan 'Exit handler never called!' bahkan di
-    # Node 20 (bahkan `npm cache clean --force` pun crash), jadi langkah ini
-    # dijalankan di image node resmi yang isinya sama dengan mesin dev:
-    # Node 22.23.1 + npm 10.9.8, tempat `npm ci` terbukti bersih.
-    container: node:22.23.1-bookworm
     defaults:
       run:
         working-directory: admin
     steps:
       - uses: actions/checkout@v4
-      - name: versions
-        run: node -v && npm -v
-      - name: install (npm ci)
-        run: npm ci --no-audit --no-fund
-      - name: npm diagnostics on failure
-        if: failure()
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      # package-lock.json menyimpan URL tarball. Kalau lockfile dibuat di mesin
+      # yang memakai mirror npm internal, URL-nya tidak bisa dijangkau runner CI
+      # dan `npm ci` mati dengan pesan menyesatkan "Exit handler never called!".
+      # Jaga supaya lockfile tetap menunjuk registry publik.
+      - name: guard package-lock registry
         run: |
-          LOG=$(ls -S "$(npm config get cache)/_logs"/*-debug-0.log 2>/dev/null | head -1)
-          echo "debug-log=$LOG"
-          tail -n 250 "$LOG" 2>/dev/null || true
-          df -h . ; free -m
+          if grep -qE 'mirrors?\.|tencentyun|npmmirror' package-lock.json; then
+            echo "::error file=admin/package-lock.json::Lockfile memuat URL registry internal (tidak terjangkau runner CI). Jalankan: npm install --registry=https://registry.npmjs.org/"
+            exit 1
+          fi
+      - run: npm ci --no-audit --no-fund
       - run: npm run lint -- --max-warnings=0
       - run: npm run build
