@@ -32,6 +32,7 @@ const NAV_UTAMA: NavItem[] = [
   { label: "Lokasi", href: "/lokasi", icon: "map-pin" },
   { label: "Device", href: "/device", icon: "device" },
   { label: "Cuti", href: "/cuti", icon: "calendar" },
+  { label: "Lembur", href: "/lembur", icon: "calendar-check" },
   { label: "Approval", href: "/approval", icon: "check-list" },
   { label: "Profil", href: "/akun-admin", icon: "user" },
 ];
@@ -55,6 +56,7 @@ function navForRole(role: string | null): NavItem[] {
         { label: "Dashboard", href: "/dashboard", icon: "dashboard" },
         { label: "Approval", href: "/approval", icon: "check-list" },
         { label: "Cuti", href: "/cuti", icon: "calendar" },
+        { label: "Lembur", href: "/lembur", icon: "calendar-check" },
         { label: "Absensi", href: "/absensi", icon: "calendar-check" },
         { label: "Laporan", href: "/laporan", icon: "chart-bar" },
         { label: "Profil", href: "/akun-admin", icon: "user" },

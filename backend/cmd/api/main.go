@@ -79,6 +79,11 @@ func main() {
 	leaveSvc := service.NewLeaveService(leaveRepo, leaveTypeRepo, userRepo, leaveWorkdays)
 	leaveHandler := transport.NewLeaveHandler(leaveSvc, profileSvc, userRepo, settingsRepo)
 
+	// Overtime (lembur) module: records approved time only; payroll converts it.
+	overtimeRepo := repo.NewOvertimeRepository(pool)
+	overtimeSvc := service.NewOvertimeService(overtimeRepo)
+	overtimeHandler := transport.NewOvertimeHandler(overtimeSvc)
+
 	// Seed the initial admin account when configured.
 	if cfg.AdminPassword != "" {
 		if err := adminSvc.SeedAdmin(ctx, cfg.AdminPassword); err != nil {
@@ -137,6 +142,7 @@ func main() {
 			geocodeHandler.RegisterRoutes(r)
 			appInfoHandler.RegisterRoutes(r)
 			leaveHandler.RegisterRoutes(r)
+			overtimeHandler.RegisterRoutes(r)
 
 			// Admin dashboard: auth + role check (super_admin | hr).
 			r.Group(func(r chi.Router) {
@@ -145,6 +151,7 @@ func main() {
 				adminHandler.RegisterApprovalRoutes(r)
 				qrHandler.RegisterRoutes(r)
 				leaveHandler.RegisterAdminRoutes(r)
+				overtimeHandler.RegisterAdminRoutes(r)
 			})
 
 			// Approval queue: supervisors see/decide their own team;
@@ -152,6 +159,7 @@ func main() {
 			r.Group(func(r chi.Router) {
 				r.Use(transport.RequireRole(profileSvc, domain.RoleSupervisor, domain.RoleSuperAdmin, domain.RoleHR))
 				adminHandler.RegisterApprovalRoutes(r)
+				overtimeHandler.RegisterAdminRoutes(r)
 			})
 		})
 	})
