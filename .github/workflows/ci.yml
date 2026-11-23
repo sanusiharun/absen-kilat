@@ -30,16 +30,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # Versi yang sama dengan mesin dev (npm ci lokal exit 0).
-          node-version: "22.23.1"
+          # Node 20 dipakai karena regresi npm 'Exit handler never called!'
+          # menyerang Node 22/24/25 di runner (npm/cli#7666, nodejs/node#53904);
+          # di Node 20 dengan konfigurasi yang sama install-nya bersih.
+          # Next 16.3.1 hanya butuh >= 20.9.0, jadi ini aman.
+          node-version: "20"
       # `npm ci` di runner gagal 'Exit handler never called!' setelah ~70 detik
       # padahal lokal bersih. Cache npm dari actions/setup-node dicurigai
       # membawa tarball rusak, jadi cache dimatikan dan cache lokal dibersihkan.
       - name: install (npm ci)
         run: |
-          # npm 10.9.x termasuk versi yang kena bug 'Exit handler never called!'
-          # di runner (npm/cli#7666); 10.8.1 dipakai sebagai pembanding.
-          npm i -g npm@10.8.1
           npm cache clean --force
           npm ci --no-audit --no-fund --foreground-scripts
       # Diagnosis otomatis kalau install gagal: versi runtime, log debug npm
