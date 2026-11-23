@@ -30,12 +30,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # Sebagian rilis Node 22/24/25 punya regresi npm yang membuat `npm ci`
+          # gagal dengan "Exit handler never called!" (npm/cli#7657, #7666,
+          # #8974). Versi ini yang terbukti jalan di mesin dev.
+          node-version: "22.23.1"
           cache: npm
           cache-dependency-path: admin/package-lock.json
-      # --no-audit --no-fund: tanpa ini `npm ci` di runner sempat gagal dengan
-      # "npm error Exit handler never called!" (bug internal npm pada langkah
-      # audit/funding, bukan masalah dependency).
+      # Pakai npm yang sama dengan mesin dev: bug "Exit handler never called!"
+      # berasal dari npm/Node yang dibundel image runner, bukan dari dependency.
+      - run: npm i -g npm@10.9.8
       - run: npm ci --no-audit --no-fund
       - run: npm run lint -- --max-warnings=0
       - run: npm run build
