@@ -18,14 +18,7 @@ jobs:
           go-version-file: backend/go.mod
       - name: build
         run: go build ./...
-      # Catatan jujur: 4 tes berikut SUDAH gagal di main (fixture bertanggal hardcoded
-      # + satu panic), jadi langkah ini dibiarkan tidak memblokir supaya sinyal CI
-      # tetap berguna. Perbaiki fixture-nya (pakai tanggal relatif), lalu hapus
-      # continue-on-error ini:
-      #   TestApplyAnnualLeaveWorkdays · TestApplyRejectsWeekendSpanCount
-      #   TestApplyPaternityDynamic  · TestApproveRejectFlow
-      - name: test (lihat catatan known-failure di atas)
-        continue-on-error: true
+      - name: test
         run: go test ./...
 
   frontend:
@@ -40,6 +33,9 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: admin/package-lock.json
-      - run: npm ci
+      # --no-audit --no-fund: tanpa ini `npm ci` di runner sempat gagal dengan
+      # "npm error Exit handler never called!" (bug internal npm pada langkah
+      # audit/funding, bukan masalah dependency).
+      - run: npm ci --no-audit --no-fund
       - run: npm run lint -- --max-warnings=0
       - run: npm run build

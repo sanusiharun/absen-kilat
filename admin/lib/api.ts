@@ -30,7 +30,7 @@ export function clearToken() {
   window.localStorage.removeItem(TOKEN_KEY);
 }
 
-export async function api<T = any>(
+export async function api<T = unknown>(
   path: string,
   options: RequestInit & { auth?: boolean } = {}
 ): Promise<T> {
