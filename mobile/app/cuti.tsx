@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -15,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { leaveApi, type Leave } from '@/src/api/endpoints';
 import { colors, spacing } from '@/src/theme';
+import { confirmAction, notifyError } from '@/src/lib/notify';
 
 const TYPE_META: Record<string, { label: string; color: string }> = {
   annual: { label: 'Cuti Tahunan', color: colors.primary },
@@ -50,7 +50,7 @@ export default function CutiScreen() {
       const d = await leaveApi.list();
       setLeaves(d.leaves);
     } catch (e) {
-      Alert.alert('Gagal', e instanceof Error ? e.message : 'Memuat data cuti gagal');
+      notifyError(e instanceof Error ? e.message : 'Memuat data cuti gagal');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -62,21 +62,20 @@ export default function CutiScreen() {
   }, [load]);
 
   const cancel = (id: string) => {
-    Alert.alert('Batalkan Pengajuan', 'Yakin ingin membatalkan cuti ini?', [
-      { text: 'Batal', style: 'cancel' },
-      {
-        text: 'Ya, Batalkan',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await leaveApi.cancel(id);
-            await load();
-          } catch (e) {
-            Alert.alert('Gagal', e instanceof Error ? e.message : 'Batalkan gagal');
-          }
-        },
+    confirmAction(
+      'Batalkan Pengajuan',
+      'Yakin ingin membatalkan cuti ini?',
+      'Ya, Batalkan',
+      async () => {
+        try {
+          await leaveApi.cancel(id);
+          await load();
+        } catch (e) {
+          notifyError(e instanceof Error ? e.message : 'Batalkan gagal');
+        }
       },
-    ]);
+      true
+    );
   };
 
   return (

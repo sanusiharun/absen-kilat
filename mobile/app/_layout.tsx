@@ -12,6 +12,11 @@ import { useEffect } from 'react';
 import { Text, TextInput } from 'react-native';
 
 import { colors } from '@/src/theme';
+import { installWebAlertShim } from '@/src/lib/alertShim';
+
+// react-native-web has no Alert implementation; install the shim before any
+// screen mounts so "Berhasil"/"Gagal" dialogs are visible on the web build.
+installWebAlertShim();
 
 // Terapkan Plus Jakarta Sans sebagai font default semua Text/TextInput
 // setelah font selesai dimuat (fontFamily bawaan RN tidak punya PJS).

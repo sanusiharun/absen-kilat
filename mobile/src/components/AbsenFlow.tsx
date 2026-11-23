@@ -9,7 +9,6 @@ import * as Location from 'expo-location';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   Pressable,
@@ -25,6 +24,8 @@ import { attendanceApi, geocodeApi, locationApi, AbsenLocation } from '@/src/api
 import { Button } from '@/src/components/AuthForm';
 import { LOCATION_TYPE_ICON, LOCATION_TYPE_LABEL, LocationPicker } from '@/src/components/LocationPicker';
 import { colors, spacing } from '@/src/theme';
+import { notify } from '@/src/lib/notify';
+import { appendPhoto } from '@/src/lib/photoForm';
 import {
   clearAbsenLocation,
   getSavedAbsenLocation,
@@ -207,11 +208,15 @@ export function AbsenFlow({ type, initialLocationId, initialLocationName, initia
       const form = new FormData();
       form.append('type', type);
       if (photoUri) {
-        form.append('photo', {
-          uri: photoUri,
-          name: `absen-${Date.now()}.jpg`,
-          type: 'image/jpeg',
-        } as unknown as Blob);
+        // Web must send a real Blob, native sends {uri,name,type}; if this fails
+        // the server would store an attendance with no photo at all.
+        try {
+          await appendPhoto(form, 'photo', photoUri, `absen-${Date.now()}.jpg`);
+        } catch {
+          setError('Foto gagal diproses. Coba ambil ulang fotonya.');
+          setSubmitting(false);
+          return;
+        }
       }
       if (selectedLocation) form.append('location_id', selectedLocation.id);
       if (coords) {
@@ -223,10 +228,10 @@ export function AbsenFlow({ type, initialLocationId, initialLocationName, initia
       form.append('device', Platform.OS === 'ios' ? 'iOS' : 'Android');
 
       await attendanceApi.submit(form);
-      Alert.alert(
+      notify(
         'Berhasil ✅',
         `Absen ${isCheckIn ? 'masuk' : 'keluar'} tercatat. Terima kasih!`,
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+        () => router.replace('/(tabs)')
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Absen gagal dikirim');

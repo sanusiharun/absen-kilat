@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { leaveApi, type LeaveType } from '@/src/api/endpoints';
 import { colors, spacing } from '@/src/theme';
+import { notify, notifyError } from '@/src/lib/notify';
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -38,7 +38,7 @@ export default function ApplyCutiScreen() {
         setTypes(d.leave_types);
         if (d.leave_types[0]) setSelected(d.leave_types[0].code);
       })
-      .catch((e) => Alert.alert('Gagal', e instanceof Error ? e.message : 'Memuat tipe cuti'))
+      .catch((e) => notifyError(e instanceof Error ? e.message : 'Memuat tipe cuti'))
       .finally(() => setLoadingTypes(false));
   }, []);
 
@@ -51,16 +51,16 @@ export default function ApplyCutiScreen() {
   const submit = async () => {
     if (!selected) return;
     if (start > end) {
-      Alert.alert('Tanggal salah', 'Tanggal mulai tidak boleh setelah tanggal selesai.');
+      notify('Tanggal salah', 'Tanggal mulai tidak boleh setelah tanggal selesai.');
       return;
     }
     const extra = Number(extraDays) || 0;
     if (needsExtra && extra <= 0) {
-      Alert.alert('Hari tambahan', `Cuti ini membutuhkan hari tambahan (mis. paternity 3/5/7, maternity 90).`);
+      notify('Hari tambahan', 'Cuti ini membutuhkan hari tambahan (mis. paternity 3/5/7, maternity 90).');
       return;
     }
     if (extra > maxExtra) {
-      Alert.alert('Kelebihan', `Maksimal tambahan ${maxExtra} hari.`);
+      notify('Kelebihan', `Maksimal tambahan ${maxExtra} hari.`);
       return;
     }
     setSubmitting(true);
@@ -72,11 +72,11 @@ export default function ApplyCutiScreen() {
         reason: reason.trim() || undefined,
         extra_days: extra > 0 ? extra : undefined,
       });
-      Alert.alert('Berhasil', 'Pengajuan cuti dikirim, menunggu persetujuan.', [
-        { text: 'OK', onPress: () => router.replace('/cuti') },
-      ]);
+      notify('Berhasil ✅', 'Pengajuan cuti dikirim dan menunggu persetujuan.', () =>
+        router.replace('/cuti')
+      );
     } catch (e) {
-      Alert.alert('Gagal', e instanceof Error ? e.message : 'Pengajuan gagal');
+      notifyError(e instanceof Error ? e.message : 'Pengajuan gagal');
     } finally {
       setSubmitting(false);
     }
