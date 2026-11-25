@@ -1,7 +1,11 @@
 // API client for the Absen Kilat admin app.
 // Token is stored in localStorage (browser-only).
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8090/api/v1";
+// Default RELATIF: browser memanggil origin yang sama dan Next me-rewrite
+// /api/v1/* ke API (lihat next.config.ts). Dengan begitu tidak perlu membuka
+// port API ke publik dan tidak ada masalah CORS. Override lewat
+// NEXT_PUBLIC_API_URL bila API memang berada di origin lain.
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/api/v1";
 
 // Root URL (tanpa suffix /api/v1), dipakai untuk membangun URL file statis.
 export const API_ROOT = API_BASE.replace(/\/api\/v1\/?$/, "");
