@@ -122,7 +122,8 @@ func main() {
 	qrHandler := transport.NewQrHandler(qrSvc, photoStore)
 	appInfoHandler := transport.NewAppInfoHandler(appSvc)
 	geocodeHandler := transport.NewGeocodeHandler(geocodeSvc)
-	accessHandler := transport.NewAccessHandler(accessResolver, profileSvc)
+	accessSvc := service.NewAccessService(accessRepo, userRepo, accessResolver)
+	accessHandler := transport.NewAccessHandler(accessResolver, profileSvc, accessSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -176,6 +177,7 @@ func main() {
 				leaveHandler.RegisterAdminRoutes(r)
 				overtimeHandler.RegisterAdminRoutes(r)
 				projectHandler.RegisterAdminRoutes(r)
+				accessHandler.RegisterAdminRoutes(r)
 			})
 
 			// Approval queue: supervisors see/decide their own team;
