@@ -24,48 +24,34 @@ export type Me = {
 
 type NavItem = { label: string; href: string; icon: IconName };
 
-const NAV_UTAMA: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: "dashboard" },
-  { label: "Pengguna", href: "/pengguna", icon: "users" },
-  { label: "Absensi", href: "/absensi", icon: "calendar-check" },
-  { label: "Laporan", href: "/laporan", icon: "chart-bar" },
-  { label: "Lokasi", href: "/lokasi", icon: "map-pin" },
-  { label: "Device", href: "/device", icon: "device" },
-  { label: "Cuti", href: "/cuti", icon: "calendar" },
-  { label: "Lembur", href: "/lembur", icon: "calendar-check" },
-  { label: "Proyek & Mitra", href: "/proyek", icon: "map-pin" },
-  { label: "Approval", href: "/approval", icon: "check-list" },
-  { label: "Profil", href: "/akun-admin", icon: "user" },
-];
+// Menu yang boleh dibuka datang dari server (GET /me/permissions), bukan dari
+// daftar hardcoded di frontend. Dengan begitu akses bisa diatur per user tanpa
+// menyentuh kode admin; backend tetap menolak route yang tidak diizinkan.
+type MenuAccess = { key: string; label: string; href: string; actions: string[] };
 
-const NAV_PENGATURAN: NavItem[] = [
-  { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
-];
+const MENU_ICONS: Record<string, IconName> = {
+  dashboard: "dashboard",
+  pengguna: "users",
+  absensi: "calendar-check",
+  laporan: "chart-bar",
+  lokasi: "map-pin",
+  device: "device",
+  cuti: "calendar",
+  lembur: "calendar-check",
+  proyek: "map-pin",
+  approval: "check-list",
+  pengaturan: "settings",
+  "akun-admin": "user",
+};
 
-// Role -> menu yang boleh dilihat. Role tak dikenal / employee => akses ditolak.
+// Menu yang ditampilkan pada grup bawah (bukan grup "Menu Utama").
+const BOTTOM_MENU_KEYS = ["pengaturan"];
+
 const ROLE_KEY = "absenkilat_role";
 const ADMIN_ROLES = ["super_admin", "hr", "supervisor"];
 
-function navForRole(role: string | null): NavItem[] {
-  switch (role) {
-    case "super_admin":
-      return [...NAV_UTAMA, ...NAV_PENGATURAN];
-    case "hr":
-      return NAV_UTAMA; // semua kecuali Pengaturan
-    case "supervisor":
-      return [
-        { label: "Dashboard", href: "/dashboard", icon: "dashboard" },
-        { label: "Approval", href: "/approval", icon: "check-list" },
-        { label: "Cuti", href: "/cuti", icon: "calendar" },
-        { label: "Lembur", href: "/lembur", icon: "calendar-check" },
-        { label: "Absensi", href: "/absensi", icon: "calendar-check" },
-        { label: "Laporan", href: "/laporan", icon: "chart-bar" },
-        { label: "Profil", href: "/akun-admin", icon: "user" },
-      ];
-    default:
-      // role belum termuat / employee / tak dikenal
-      return NAV_UTAMA; // default super_admin (flash acceptable), dicek lagi setelah /me
-  }
+function toNavItem(menu: MenuAccess): NavItem {
+  return { label: menu.label, href: menu.href, icon: MENU_ICONS[menu.key] ?? "dashboard" };
 }
 
 export default function AdminShell({
@@ -84,6 +70,8 @@ export default function AdminShell({
   const { theme, toggle } = useTheme();
   const [me, setMe] = useState<Me | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [menus, setMenus] = useState<MenuAccess[]>([]);
+  const [menusLoaded, setMenusLoaded] = useState(false);
 
   const loadMe = useCallback(async () => {
     if (!getToken()) {
@@ -97,6 +85,16 @@ export default function AdminShell({
       try {
         window.localStorage.setItem(ROLE_KEY, data.role);
       } catch {}
+      // Menu diambil terpisah supaya kegagalan endpoint permission tidak
+      // mengeluarkan user dari sesi yang valid.
+      try {
+        const perms = await api<{ menus: MenuAccess[] }>("/me/permissions");
+        setMenus(perms.menus ?? []);
+      } catch {
+        setMenus([]);
+      } finally {
+        setMenusLoaded(true);
+      }
     } catch (err) {
       if (err instanceof Error && /401|403/.test(err.message)) {
         clearToken();
@@ -123,7 +121,11 @@ export default function AdminShell({
 
   // Akses ditolak jika role sudah termuat dan bukan admin (employee / tak dikenal).
   const denied = role !== null && !ADMIN_ROLES.includes(role);
-  const navItems = denied ? [] : navForRole(role);
+  // Nav dirender dari permission server. Saat masih memuat, jangan tampilkan
+  // menu default apa pun supaya tidak ada menu "berkedip" yang ternyata ditolak.
+  const visibleMenus = denied || !menusLoaded ? [] : menus;
+  const navItems = visibleMenus.filter((m) => !BOTTOM_MENU_KEYS.includes(m.key)).map(toNavItem);
+  const navBottom = visibleMenus.filter((m) => BOTTOM_MENU_KEYS.includes(m.key)).map(toNavItem);
 
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === href : pathname.startsWith(href);
@@ -179,23 +181,12 @@ export default function AdminShell({
           </div>
           {navItems.map(navLink)}
 
-          {!denied && role === "super_admin" && (
+          {navBottom.length > 0 && (
             <>
               <div className="mb-1.5 mt-5 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 Pengaturan
               </div>
-              <Link
-                key="/pengaturan"
-                href="/pengaturan"
-                className={`mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                  isActive("/pengaturan")
-                    ? "bg-indigo-50 font-semibold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400"
-                    : "font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                }`}
-              >
-                <Icon name="settings" className="h-[18px] w-[18px]" />
-                Pengaturan
-              </Link>
+              {navBottom.map(navLink)}
             </>
           )}
         </nav>
