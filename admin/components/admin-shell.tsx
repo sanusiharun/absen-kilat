@@ -4,9 +4,9 @@
  * Every admin page renders inside <AdminShell title=... subtitle=...>. */
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { api, clearToken, getToken } from "@/lib/api";
+import { UnauthorizedError, api, getToken, redirectToLogin } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { Icon, type IconName } from "@/components/icons";
 import { Avatar } from "@/components/ui";
@@ -66,16 +66,18 @@ export default function AdminShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const { theme, toggle } = useTheme();
   const [me, setMe] = useState<Me | null>(null);
   const [role, setRole] = useState<string | null>(null);
   const [menus, setMenus] = useState<MenuAccess[]>([]);
   const [menusLoaded, setMenusLoaded] = useState(false);
+  // true saat sesi tidak bisa dipulihkan: tampilkan panel "sesi berakhir",
+  // bukan dashboard setengah kosong dengan banner error.
+  const [sessionEnded, setSessionEnded] = useState(false);
 
   const loadMe = useCallback(async () => {
     if (!getToken()) {
-      router.replace("/login");
+      redirectToLogin("required");
       return;
     }
     try {
@@ -96,15 +98,22 @@ export default function AdminShell({
         setMenusLoaded(true);
       }
     } catch (err) {
-      if (err instanceof Error && /401|403/.test(err.message)) {
-        clearToken();
-        router.replace("/login");
-          return;
+      if (err instanceof UnauthorizedError) {
+        // lib/api sudah membersihkan token & mengarahkan ke /login.
+        setSessionEnded(true);
+        return;
       }
+      if (err instanceof Error && /401/.test(err.message)) {
+        redirectToLogin("expired");
+        setSessionEnded(true);
+        return;
+      }
+      // Gagal memuat /me tanpa 401: biarkan dashboard memakai data kosong.
       setMe(null);
     } finally {
+      setMenusLoaded(true);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
@@ -112,11 +121,10 @@ export default function AdminShell({
   }, [loadMe]);
 
   const logout = () => {
-    clearToken();
     try {
       window.localStorage.removeItem(ROLE_KEY);
     } catch {}
-    router.replace("/login");
+    redirectToLogin("required");
   };
 
   // Akses ditolak jika role sudah termuat dan bukan admin (employee / tak dikenal).
@@ -254,7 +262,26 @@ export default function AdminShell({
         </header>
 
         <main className="p-4 md:p-8">
-          {denied ? (
+          {sessionEnded ? (
+            <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl bg-white px-6 py-14 text-center shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+                <Icon name="clock" className="h-8 w-8" />
+              </div>
+              <h2 className="mt-5 text-xl font-bold text-slate-900 dark:text-slate-100">Sesi berakhir</h2>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Sesi Anda sudah berakhir karena tidak ada aktivitas dalam waktu lama. Silakan masuk kembali —
+                data yang tadi sedang dibuka akan dimuat ulang setelah Anda masuk.
+              </p>
+              <button
+                type="button"
+                onClick={() => redirectToLogin("expired")}
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700"
+              >
+                <Icon name="logout" className="h-4 w-4" />
+                Masuk kembali
+              </button>
+            </div>
+          ) : denied ? (
             <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl bg-white px-6 py-14 text-center shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
               <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400">
                 <Icon name="lock" className="h-8 w-8" />

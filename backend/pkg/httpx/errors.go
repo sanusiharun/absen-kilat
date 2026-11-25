@@ -27,7 +27,7 @@ var (
 	ErrUnauthorized = &HTTPError{
 		StatusCode: http.StatusUnauthorized,
 		Code:       "UNAUTHORIZED",
-		Message:    "authentication is required",
+		Message:    "sesi tidak valid atau sudah berakhir, silakan masuk kembali",
 	}
 	ErrForbidden = &HTTPError{
 		StatusCode: http.StatusForbidden,
