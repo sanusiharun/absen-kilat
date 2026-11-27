@@ -59,3 +59,13 @@ Change ID: `mv-agentic-runtime`. No implementation authorized before G2.
 - [ ] 8.2 Update `HERMES_ONBOARDING.md` steps 4/5/7 from "pending" to "RUN" where evidence exists.
 - [ ] 8.3 Record `COST_MANAGEMENT.md` budget defaults concretely (values chosen by owner).
 - [ ] 8.4 G3 evidence bundle + G4 release approval request.
+
+## D6 — keputusan owner yang sudah mengikat (2026-11-27)
+
+- **Budget**: 50.000 token per change, wall-clock 1800 s, maksimum 2 attempt transient.
+- **Reservasi worst-case**: saat telemetri token `unavailable`, tagih **penuh** 50.000 token.
+  Konsekuensi yang harus dilaporkan runtime: dengan budget 50k hanya ada **satu** run per change
+  sampai telemetri tersedia.
+- **Kanal approval**: DM privat owner, verifikasi `from.id` + `chat.type == "private"`,
+  anti-replay `message_id` + jendela kedaluwarsa, binding `change + gate + digest + base_sha`,
+  dukung `REVOKE`, audit record. Relay GitHub **bukan** autentikasi manusia.

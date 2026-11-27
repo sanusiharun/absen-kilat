@@ -155,9 +155,9 @@ hanya sebagai rujukan percakapan. Bila kanal DM belum terkonfigurasi, `dispatch`
 
 Sampai kanal DM terkonfigurasi dan diverifikasi, dispatch tetap disabled (fail closed).
 
-**Worst-case bound (belum diputuskan owner):** usulan konservatif — reservasi **penuh** 50.000
-token per run ketika telemetri `unavailable`, sehingga anggaran tidak pernah terlihat tersisa
-padahal sudah terpakai. Konsekuensinya: dengan budget 50k hanya ada **satu** run per change
+**Worst-case bound (DIPUTUSKAN owner, comment 7222715922):** reservasi **penuh** 50.000 token
+per run ketika telemetri `unavailable`, sehingga anggaran tidak pernah terlihat tersisa padahal
+sudah terpakai. Konsekuensinya: dengan budget 50k hanya ada **satu** run per change
 sampai telemetri tersedia; runtime harus melaporkan batas ini, bukan menyembunyikannya.
 
 ## Threat model
