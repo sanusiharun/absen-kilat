@@ -29,7 +29,8 @@ CREATE TABLE leases (
   task_ids    TEXT NOT NULL,         -- JSON array
   allowed_paths TEXT NOT NULL,       -- JSON array
   base_sha    TEXT NOT NULL,
-  digest      TEXT NOT NULL,         -- approved spec digest
+  digest      TEXT NOT NULL,         -- approved spec digest (canonical validator)
+  plan_sha256 TEXT NOT NULL,         -- sha256 of verification.md, bound at approval
   issued_at   TEXT NOT NULL,
   expires_at  TEXT NOT NULL,
   state       TEXT NOT NULL CHECK (state IN ('active','released','expired','quarantined')),
@@ -46,22 +47,27 @@ CREATE TABLE budget (
   change_id   TEXT PRIMARY KEY,
   tokens_limit INTEGER,             -- NULL => dispatch forbidden (fail closed)
   tokens_used  INTEGER NOT NULL DEFAULT 0,
+  tokens_reserved INTEGER NOT NULL DEFAULT 0, -- held before worker launch
   wall_limit_s INTEGER,
   wall_used_s  INTEGER NOT NULL DEFAULT 0,
   attempts     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE approvals (
-  change_id   TEXT NOT NULL,
-  gate        TEXT NOT NULL CHECK (gate IN ('G1','G2','G3','G4')),
-  author      TEXT NOT NULL,        -- GitHub login
-  author_id   INTEGER NOT NULL,
-  comment_url TEXT NOT NULL,
-  digest      TEXT NOT NULL,
-  base_sha    TEXT NOT NULL,
-  created_at  TEXT NOT NULL,
-  revoked_at  TEXT,
-  PRIMARY KEY (change_id, gate)
+  change_id    TEXT NOT NULL,
+  gate         TEXT NOT NULL CHECK (gate IN ('G1','G2','G3','G4')),
+  channel      TEXT NOT NULL CHECK (channel = 'telegram_dm'), -- only authenticated ingress
+  chat_id      INTEGER NOT NULL,    -- owner DM chat id, taken from the Telegram update
+  message_id   INTEGER NOT NULL,    -- anti-replay identity
+  message_hash TEXT NOT NULL,       -- sha256 of normalized approval text
+  digest       TEXT NOT NULL,       -- canonical validator digest
+  base_sha     TEXT NOT NULL,
+  head_sha     TEXT NOT NULL,       -- exact reviewed head
+  plan_sha256  TEXT NOT NULL,       -- sha256 of verification.md (test plan)
+  created_at   TEXT NOT NULL,
+  revoked_at   TEXT,
+  PRIMARY KEY (change_id, gate),
+  UNIQUE (channel, chat_id, message_id)
 );
 
 CREATE TABLE runs (
@@ -89,8 +95,7 @@ runtime lease expire   --change ID                     # mark expired + quaranti
 runtime dedup check    --event-id E                    # exit 0 unseen, exit 10 already seen
 runtime budget set     --change ID --tokens N --wall 2h
 runtime budget charge  --change ID --tokens N --wall-seconds S
-runtime approval record --change ID --gate G1 --author LOGIN --author-id ID \
-                       --comment-url URL --digest D --base-sha SHA
+runtime approval ingest --change ID --gate G1            # consume one authenticated Telegram DM
 runtime approval verify --change ID --gate G1           # exit 0 valid, 11 invalid/missing
 runtime dispatch       --change ID                     # refuses unless lease+approvals+budget ok
 runtime status         --change ID [--json]
@@ -98,6 +103,9 @@ runtime status         --change ID [--json]
 
 Python API mirrors the verbs (`LeaseStore`, `DedupStore`, `BudgetLedger`,
 `ApprovalVerifier`, `WorkerRunner`) so tests exercise the same paths as the CLI.
+`approval ingest` accepts **no** author, comment or identity argument: the chat id, message id
+and text hash are read from the already-authenticated Telegram update. A caller-supplied
+identity is never accepted.
 
 ## Key decisions
 
@@ -107,14 +115,22 @@ Python API mirrors the verbs (`LeaseStore`, `DedupStore`, `BudgetLedger`,
    coordinator exists (out of scope).
 2. **Dedup keyed by GitHub event id**, not by content hash, so an edited comment is a new
    event while a re-delivered one is not.
-3. **Approval validity is a tuple** `(change_id, gate, author_id ∈ allowlist, digest,
-   base_sha)`; any drift invalidates. `revoked_at` allows withdrawal without deleting history.
+3. **Approval validity is a tuple** `(change_id, gate, channel = telegram_dm, chat_id =
+   configured owner, message_id, message_hash, digest, base_sha, head_sha, plan_sha256)`; any
+   drift invalidates. Identity comes from the authenticated Telegram update, never from a CLI
+   argument, and GitHub comments are reference only. `revoked_at` allows withdrawal without
+   deleting history.
 4. **Budget default is "unset ⇒ forbid"** (fail closed), matching `COST_MANAGEMENT.md`.
 5. **Worker termination**: SIGTERM → grace 10s → SIGKILL on the recorded PID **and** its
    process group; after a kill the worktree is moved to `quarantine/<change>-<ts>/` and the
    run is recorded `killed`/`uncertain`; re-dispatch requires an explicit human note.
-6. **Digest** computed over sorted `path\0sha256(content)` for the artefact set declared by
-   the change; recomputed before dispatch and compared with the approval record.
+6. **Digest** is the canonical one produced by `python3 tools/validate_sdd.py --digest CHANGE
+   GATE`: for each artefact, an 8-byte big-endian length prefix followed by the relative posix
+   path, then the same prefix followed by the file bytes, all fed to one SHA-256. G1 covers
+   `proposal.md`; G2 covers `proposal.md` + `design.md` + `tasks.md` + `specs/*/spec.md`.
+   No alternative or parallel digest algorithm is allowed. Because the canonical digest does
+   not cover `verification.md`, the approval also binds `plan_sha256 = sha256sum
+   openspec/changes/<change>/verification.md`, and `verify` recomputes both before dispatch.
 
 ## Budget, timeout and telemetry (revision 2)
 
@@ -131,12 +147,21 @@ hanya diketahui bila worker melaporkannya. Runtime mencatat `telemetry` per run:
 **billing worst-case** (batas atas yang disepakati owner) agar anggaran tidak pernah "terlihat
 kosong padahal terpakai". Nilai `unknown` tidak pernah ditulis sebagai 0.
 
+**Reservasi atomik sebelum launch.** `dispatch` holds the worst-case amount
+(`tokens_used + tokens_reserved + reservation ≤ tokens_limit`) in the same `BEGIN IMMEDIATE`
+transaction that creates the lease; only after the hold commits is a worker started. If the hold
+cannot be written, budget is unreadable, or the coordinator crashes between hold and start, the
+dispatch fails closed (exit 21), no worker runs, and the reservation stays held until an explicit
+human release. A crash during a run leaves the run `uncertain` and never returns the reservation
+automatically.
+
 ## Approval identity — kanal human-only (revision 2)
 
 Masalah: komentar dari agen dan dari owner memakai akun GitHub yang sama, jadi `author_id`
 tidak membuktikan manusia. **Owner decision (D5, 2026-11-27): kanal = Telegram owner DM.**
 
-Format pesan (kanal ini): `APPROVE <change> <gate> <digest> <base_sha>`.
+Format pesan (kanal ini): `APPROVE <change> <gate> <digest> <base_sha> <head_sha> <plan_sha256>`.
+Pesan 4-field lama (tanpa `head_sha`/`plan_sha256`) tidak berlaku dan ditolak.
 
 Verifikasi yang wajib diimplementasikan (bukan sekadar "chat-nya privat"):
 
@@ -145,13 +170,15 @@ Verifikasi yang wajib diimplementasikan (bukan sekadar "chat-nya privat"):
 | Identitas pengirim | `message.from.id` == chat id owner yang dikonfigurasi (bukan username, bukan nama tampilan) |
 | Jenis chat | DM privat (`chat.type == "private"`), tolak grup/channel/forward |
 | Anti-replay | `message_id` + hash isi dicatat; pesan yang sama tidak bisa dipakai dua kali; window kedaluwarsa (mis. 30 menit) |
-| Binding | change id + gate + digest + base SHA harus cocok persis; digest dihitung ulang saat verifikasi |
+| Binding | change id + gate + digest + base SHA + head SHA + `plan_sha256` harus cocok persis; digest dan plan hash dihitung ulang saat verifikasi |
 | Pemisahan dari agen | pesan yang berasal dari bot/agen (mis. dikirim via API dengan flag bot) ditolak; runtime hanya membaca DM manusia, dan **tidak pernah** menerima approval yang dikutip dari GitHub |
 | Pencabutan | owner bisa mengirim `REVOKE <change> <gate>`; record ditandai, bukan dihapus |
 | Audit | record approval menyimpan message_id, waktu, chat id (tanpa isi sensitif), digest, base SHA |
 
-Catatan penting: relay GitHub (prefix `[CHATGPT][…]`) **bukan** autentikasi manusia — dipakai
-hanya sebagai rujukan percakapan. Bila kanal DM belum terkonfigurasi, `dispatch` tetap ditolak.
+Catatan penting: relay GitHub (prefix `[CHATGPT][…]`) **bukan** autentikasi manusia dan tidak
+dapat di-ingest sebagai approval — dipakai hanya sebagai rujukan percakapan. `approval ingest`
+tidak menerima identitas dari pemanggil; bila update Telegram tidak lolos pemeriksaan chat id,
+jenis chat, atau replay, ingest gagal dan `dispatch` tetap ditolak.
 
 Sampai kanal DM terkonfigurasi dan diverifikasi, dispatch tetap disabled (fail closed).
 
@@ -164,7 +191,7 @@ sampai telemetri tersedia; runtime harus melaporkan batas ini, bukan menyembunyi
 
 | Threat | Control |
 |---|---|
-| Agent-authored or forged approval | author_id must be in allowlist; author_type must be `User`; record fetched from GitHub, never from issue text |
+| Agent-authored or forged approval | approval exists only as an authenticated Telegram DM from the configured owner chat; identity is taken from the update, never from caller arguments or issue text; GitHub comments are reference only |
 | Approval replay after edits | digest + base_sha bound; recompute before dispatch |
 | Prompt injection in issue/PR/log text | text treated as data; runtime never derives commands from repo content; dispatch requires an explicit change ID the human named |
 | Duplicate dispatch / double worker | unique lease row + dedup on event id |
@@ -172,7 +199,7 @@ sampai telemetri tersedia; runtime harus melaporkan batas ini, bukan menyembunyi
 | Runaway cost | budget set required; charge per run; stop at limit |
 | Worker escapes its scope | allowed_paths recorded in lease and diffed post-run; out-of-scope diff ⇒ run `failed`, evidence recorded |
 | Orphaned/killed worker keeps writing | process-group kill + post-run branch head check before accepting results |
-| Local state tampering | runtime.db is not authoritative for approvals — it caches; the verifier re-queries GitHub |
+| Local state tampering | runtime.db caches approvals; every `verify` re-checks channel, chat id, message id/hash, digest, base/head and plan hash before dispatch, and GitHub is never consulted for approval |
 
 ## Out of scope / open questions
 

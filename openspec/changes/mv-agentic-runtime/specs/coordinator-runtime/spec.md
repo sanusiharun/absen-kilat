@@ -31,15 +31,17 @@ The runtime SHALL preserve dedup state across process restarts.
 - THEN the runtime exits 10 and performs no action
 
 ### R3 — Approval identity and digest binding
-The runtime SHALL accept an approval only when the author is in the configured owner
-allowlist, the GitHub author type is `User`, the gate matches, the digest matches the
-recomputed artefact digest, and the base SHA equals the base SHA of the approval record.
+The runtime SHALL accept an approval only when it arrives on the authenticated owner Telegram DM
+(R3a), the gate matches, the canonical digest matches the recomputed artefact digest, the base SHA
+equals the approval base, the head SHA equals the reviewed head, and `plan_sha256` matches the
+recomputed `verification.md` hash.
+No identity SHALL be accepted from a CLI argument, issue text or GitHub comment.
 The runtime SHALL expose revocation without deleting history.
 Agent-authored comments SHALL NOT be accepted as approval.
 
 #### Scenario: forged approval
-- GIVEN an approval comment authored by an agent account
-- WHEN verify runs
+- GIVEN a GitHub comment or Telegram relay authored by an agent account
+- WHEN approval verify runs
 - THEN it exits 11 and dispatch remains blocked
 
 #### Scenario: stale approval after edit
@@ -64,6 +66,10 @@ Until such a channel is configured, `dispatch` SHALL remain refused.
 
 ### R4 — Budget and timeout fail-closed
 The runtime SHALL refuse dispatch when a budget is unset, exhausted or unreadable.
+The runtime SHALL reserve the run's worst-case token amount atomically in the same transaction
+that creates the lease, before any worker starts, and SHALL fail closed (exit 21, no worker) if the
+reservation cannot be committed or if the coordinator crashes between reservation and launch.
+The runtime SHALL NOT return a reservation automatically.
 The runtime SHALL enforce a wall-clock deadline per run and record the outcome.
 The runtime SHALL record unknown usage as unknown, never as zero.
 Default budget values SHALL be 50.000 tokens per change and 1800 s wall-clock, with at most two

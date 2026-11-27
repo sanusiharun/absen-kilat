@@ -19,19 +19,23 @@ Change ID: `mv-agentic-runtime`. No implementation authorized before G2.
 - [ ] 3.3 Test: dedup survives process restart (new interpreter, same DB).
 
 ## 4. Approval verification
-- [ ] 4.1 `approval record` stores author login + id, gate, digest, base SHA, comment URL.
-- [ ] 4.2 `approval verify` re-queries GitHub via `gh api` and compares: author id in allowlist,
-      author type `User`, digest, base SHA, not revoked.
-- [ ] 4.3 Test negative: agent-authored comment ⇒ invalid.
+- [ ] 4.1 `approval ingest` stores channel `telegram_dm`, chat id, message id + text hash, gate,
+      digest, base SHA, head SHA and `plan_sha256`; it accepts no identity from the caller.
+- [ ] 4.2 `approval verify` re-checks channel = telegram_dm, chat id = configured owner, message
+      id/hash unused before, digest and `plan_sha256` recomputed, base/head SHA, not revoked.
+- [ ] 4.3 Test negative: GitHub comment or agent relay ⇒ not ingestible, verify exits 11.
 - [ ] 4.4 Test negative: digest mismatch (edited artefact) ⇒ invalid.
-- [ ] 4.5 Test negative: base SHA moved ⇒ invalid.
+- [ ] 4.5 Test negative: base/head SHA moved ⇒ invalid.
 - [ ] 4.6 Test negative: approval copied from another change ⇒ invalid.
+- [ ] 4.7 Test negative: replayed Telegram `message_id` ⇒ rejected, no second approval row.
 
 ## 5. Budget and timeout
 - [ ] 5.1 `budget set`/`charge`; unset budget blocks `dispatch` (exit 21).
 - [ ] 5.2 Hard wall-clock deadline enforced by `runner` (SIGTERM → SIGKILL at deadline).
 - [ ] 5.3 Test: budget exhausted mid-run ⇒ run `failed`, dispatch blocked afterwards.
 - [ ] 5.4 Test: unknown usage is recorded as `unknown`, never as 0.
+- [ ] 5.5 Test: reservation is held inside the lease transaction; crash between hold and start
+      ⇒ no worker, process exits 21, reservation stays held (no automatic return).
 
 ## 6. Worker runner and recovery
 - [ ] 6.1 Start worker in its own process group; record PID; heartbeat to `runs`.
