@@ -45,6 +45,26 @@ that a single coordinator can run one worker per change with fail-closed behavio
 - Runbook in `docs/reengineering/engineering/HERMES_ONBOARDING.md` updated to "RUN" for
   the steps that become executable, with recorded evidence.
 
+## Owner decisions incorporated (revision 2, 2026-11-27)
+
+- **D3 budget:** 50.000 token per change, target wall-clock 30 menit, maksimum 2 attempt
+  transien. Budget kosong / tidak terbaca / terlampaui ⇒ dispatch **ditolak** (fail closed).
+- **D3 timeout vs telemetry:** batas waktu adalah **hard timeout** yang bisa ditegakkan
+  (SIGTERM→SIGKILL). Pemakaian token bergantung pada telemetri worker yang **tidak selalu
+  tersedia**; runtime wajib membedakan `telemetry=reported` vs `telemetry=unavailable` dan
+  tidak boleh memperlakukan "tidak diketahui" sebagai 0. Bila telemetri tidak tersedia,
+  runtime menagih batas atas yang disepakati (worst-case) atau menolak dispatch berikutnya —
+  pilihannya dicatat di design.
+- **D4 bootstrap:** satu eksekusi manual terkontrol untuk membangun `runtime/`, dengan lease +
+  digest + base SHA dicatat di komentar issue. Setelah itu dispatch hanya lewat runtime.
+- **Approval identity:** identitas approval **tidak boleh** hanya mengandalkan author id,
+  karena agen dan owner memakai akun GitHub yang sama (token owner). Dirancang kanal approval
+  human-only (lihat design) sebelum dispatch diaktifkan.
+- **Digest kanonik:** memakai `tools/validate_sdd.py --digest CHANGE GATE` (bukan algoritma
+  alternatif). Digest G1/G2 dihitung per gate setelah artefak final.
+- **Base SHA binding:** approval terikat base SHA; setelah PR #22 merge baseline berubah dan
+  approval lama otomatis tidak valid sampai direkonsiliasi.
+
 ## Dependencies and assumptions
 
 - GitHub remains the durable task record; the runtime is a *local* execution ledger.

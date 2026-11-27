@@ -46,7 +46,15 @@ Change ID: `mv-agentic-runtime`. No implementation authorized before G2.
 - [ ] 7.2 `status --json` prints lease, budget, approvals and last run.
 - [ ] 7.3 Cron integration note: monitor script unchanged; `dispatch` only via explicit verb.
 
-## 8. Verification and handover
+## 8. Tooling kanonik dan kanal approval
+- [ ] 8.0 Pakai `python3 tools/validate_sdd.py --digest CHANGE GATE` untuk digest G1/G2;
+      jangan menambah algoritma digest alternatif. Rekam nilai digest per gate di issue.
+- [ ] 8.0a Implementasi kanal approval human-only (pilihan owner: OOB token / signature / sesi
+      terpisah) sebelum dispatch diaktifkan; author id saja **tidak cukup**.
+- [ ] 8.0b Bind approval ke `base_sha`; setelah PR #22 merge, rekonsiliasi baseline dan tandai
+      approval lama invalid.
+
+## 9. Verification and handover
 - [ ] 8.1 Run full negative-test suite; record commands + exit codes.
 - [ ] 8.2 Update `HERMES_ONBOARDING.md` steps 4/5/7 from "pending" to "RUN" where evidence exists.
 - [ ] 8.3 Record `COST_MANAGEMENT.md` budget defaults concretely (values chosen by owner).

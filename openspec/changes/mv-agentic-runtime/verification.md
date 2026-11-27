@@ -5,6 +5,12 @@ No implementation authorized. Implementation must not start until a human-author
 approval (verified owner `sanusiharun`, id 39834005) names gate G1/G2, this change id and
 the SHA-256 digest of the reviewed artefacts.
 
+## Canonical digest
+
+Digest dihitung dengan `python3 tools/validate_sdd.py --digest CHANGE GATE` (kanonik).
+Nilai G1/G2 sebelum revisi 2: G1 `b41a5ddf…`, G2 `43e0afbe…`. Setelah revisi 2 nilai berubah
+dan wajib dicatat ulang di issue; approval lama otomatis tidak valid.
+
 ## Required evidence per gate
 
 | Gate | Evidence to record here |
@@ -28,6 +34,8 @@ the SHA-256 digest of the reviewed artefacts.
 | N8 | Budget exhausted mid-run | run failed, further dispatch refused |
 | N9 | Worker ignores SIGTERM past grace | SIGKILL on process group, worktree quarantined |
 | N10 | Worker writes outside `allowed_paths` | run failed, evidence attached, no auto-retry |
+| N11 | Token telemetry unavailable | run records `telemetry=unavailable`, charges worst-case bound, next dispatch still evaluated |
+| N12 | Approval relayed by an agent account (shared token) | rejected; requires human-only channel |
 
 ## Positive dry run (after G2)
 

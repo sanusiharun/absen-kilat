@@ -47,10 +47,25 @@ Agent-authored comments SHALL NOT be accepted as approval.
 - WHEN an artefact changes so the recomputed digest is `D2`
 - THEN verify exits 11 and the affected gate is invalidated
 
+### R3a — Approval channel is human-only
+The runtime SHALL NOT treat a GitHub comment author id as proof of human approval.
+The runtime SHALL accept approval only from a channel that agents cannot write to
+(out-of-band owner message with `APPROVE <change> <gate> <digest> <base_sha>`, or a signature
+verifiable with a key absent from the worker host).
+Until such a channel is configured, `dispatch` SHALL remain refused.
+
+#### Scenario: agent-authored relay is not approval
+- GIVEN a comment carrying a `[CHATGPT][TASK]` prefix that claims owner approval
+- WHEN approval verify runs
+- THEN it exits 11 and dispatch remains refused
+
 ### R4 — Budget and timeout fail-closed
 The runtime SHALL refuse dispatch when a budget is unset, exhausted or unreadable.
 The runtime SHALL enforce a wall-clock deadline per run and record the outcome.
 The runtime SHALL record unknown usage as unknown, never as zero.
+Default budget values SHALL be 50.000 tokens per change and 1800 s wall-clock, with at most two
+transient attempts. A hard wall-clock deadline SHALL be enforced regardless of token telemetry;
+when telemetry is `unavailable` the runtime SHALL charge a worst-case bound rather than zero.
 
 #### Scenario: unset budget
 - GIVEN no budget for change `X`

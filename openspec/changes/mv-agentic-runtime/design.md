@@ -116,6 +116,36 @@ Python API mirrors the verbs (`LeaseStore`, `DedupStore`, `BudgetLedger`,
 6. **Digest** computed over sorted `path\0sha256(content)` for the artefact set declared by
    the change; recomputed before dispatch and compared with the approval record.
 
+## Budget, timeout and telemetry (revision 2)
+
+| Parameter | Nilai | Penegakan |
+|---|---|---|
+| `tokens_limit` | **50.000 / change** | charge per run; bila terlampaui → run `failed` |
+| `wall_limit_s` | **1800** (target 30 menit) | hard deadline runner: SIGTERM → 10s → SIGKILL process group |
+| `attempts` | **2** (transien saja) | attempt ke-3 ditolak; kegagalan deterministik tidak di-retry |
+| budget tidak diset/tidak terbaca | — | **dispatch ditolak** (fail closed, exit 21) |
+
+**Telemetri token tidak setara timeout.** Wall-clock selalu bisa ditegakkan; pemakaian token
+hanya diketahui bila worker melaporkannya. Runtime mencatat `telemetry` per run:
+`reported` (angka dari worker) atau `unavailable`. Untuk `unavailable` runtime memakai
+**billing worst-case** (batas atas yang disepakati owner) agar anggaran tidak pernah "terlihat
+kosong padahal terpakai". Nilai `unknown` tidak pernah ditulis sebagai 0.
+
+## Approval identity — kanal human-only (revision 2)
+
+Masalah: komentar dari agen dan dari owner memakai akun GitHub yang sama, jadi `author_id`
+tidak membuktikan manusia. Usulan (pilih satu, keputusan owner):
+
+1. **Out-of-band token (disarankan).** Approval ditandatangani di kanal privat yang tidak bisa
+   ditulis agen: Telegram DM owner ke Hermes dengan format `APPROVE <change> <gate> <digest>
+   <base_sha>`. Runtime memverifikasi pesan itu berasal dari chat id owner (bukan GitHub), lalu
+   mengaitkannya ke komentar issue oleh manusia sebagai rujukan.
+2. **GPG/SSH signature** pada komentar (`git verify-commit` style) dari kunci owner yang tidak
+   ada di VPS.
+3. **Environment terpisah**: sesi penyetujuan di mesin owner, VPS hanya menerima record.
+
+Sampai salah satu aktif, dispatch tetap disabled (fail closed).
+
 ## Threat model
 
 | Threat | Control |
