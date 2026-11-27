@@ -25,8 +25,8 @@ var routes = []RouteRule{
 	{"GET", "/admin/users", Permission("pengguna", ActionView)},
 	{"POST", "/admin/users", Permission("pengguna", ActionCreate)},
 	{"PATCH", "/admin/users/{id}", Permission("pengguna", ActionUpdate)},
-	{"GET", "/admin/users/{id}/permissions", Permission("pengguna", ActionView)},
-	{"PATCH", "/admin/users/{id}/permissions", Permission("pengguna", ActionUpdate)},
+	{"GET", "/admin/users/{id}/permissions", Permission("akses", ActionView)},
+	{"PATCH", "/admin/users/{id}/permissions", Permission("akses", ActionUpdate)},
 
 	// Lokasi (+ QR tokens are managed from the Lokasi page)
 	{"GET", "/admin/locations", Permission("lokasi", ActionView)},

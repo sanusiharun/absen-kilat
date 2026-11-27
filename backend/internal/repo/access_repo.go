@@ -145,9 +145,21 @@ func (r *AccessRepository) recordAudit(ctx context.Context, actorID, targetUserI
 func DefaultRoleTemplates() map[string][]string {
 	all := authz.AllPermissions()
 
+	// Template HR: semua kecuali pengaturan dan pengelolaan akses. Memisahkan
+	// menu.akses.* dari HR adalah inti identity-hardening R2: izin mengubah
+	// menu/permission per user tidak boleh ikut menempel pada izin mengubah data
+	// pengguna.
+	hrExcluded := []string{"menu.pengaturan.", "menu.akses."}
 	hr := make([]string, 0, len(all))
 	for _, p := range all {
-		if len(p) >= len("menu.pengaturan.") && p[:len("menu.pengaturan.")] == "menu.pengaturan." {
+		skip := false
+		for _, prefix := range hrExcluded {
+			if len(p) >= len(prefix) && p[:len(prefix)] == prefix {
+				skip = true
+				break
+			}
+		}
+		if skip {
 			continue
 		}
 		hr = append(hr, p)

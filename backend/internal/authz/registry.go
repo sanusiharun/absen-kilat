@@ -48,6 +48,7 @@ const PermissionPrefix = "menu."
 var menus = []Menu{
 	{Key: "dashboard", Label: "Dashboard", Href: "/dashboard", Actions: []Action{ActionView}, Scope: ScopeAll},
 	{Key: "pengguna", Label: "Pengguna", Href: "/pengguna", Actions: []Action{ActionView, ActionCreate, ActionUpdate}, Scope: ScopeAll},
+	{Key: "akses", Label: "Akses Menu", Href: "/pengguna", Actions: []Action{ActionView, ActionUpdate}, Scope: ScopeAll},
 	{Key: "absensi", Label: "Absensi", Href: "/absensi", Actions: []Action{ActionView, ActionOverride}, Scope: ScopeTeam},
 	{Key: "laporan", Label: "Laporan", Href: "/laporan", Actions: []Action{ActionView, ActionExport}, Scope: ScopeTeam},
 	{Key: "lokasi", Label: "Lokasi", Href: "/lokasi", Actions: []Action{ActionView, ActionCreate, ActionUpdate, ActionDelete}, Scope: ScopeAll},
