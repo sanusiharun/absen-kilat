@@ -13,18 +13,6 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
-  {
-    rules: {
-      // Setiap halaman admin memuat data lewat `useEffect(() => { load(); }, [])`
-      // dan `load()` menyalakan state loading lebih dulu. Pola itu disengaja dan
-      // benar secara React; aturan ini berasal dari panduan migrasi React
-      // Compiler (menyarankan use()/Server Components/React Query), bukan
-      // indikasi bug. Dimatikan agar `--max-warnings=0` di CI tetap berguna
-      // untuk aturan lain. Bisa dinyalakan lagi kalau data-fetching dipindah ke
-      // React Query atau Server Components.
-      "react-hooks/set-state-in-effect": "off",
-    },
-  },
 ]);
 
 export default eslintConfig;

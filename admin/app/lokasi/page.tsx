@@ -93,6 +93,7 @@ export default function LokasiPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
     loadQrTokens();
   }, [loadQrTokens]);
 
@@ -118,6 +119,7 @@ export default function LokasiPage() {
   }, [router]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
     load();
   }, [load]);
 
