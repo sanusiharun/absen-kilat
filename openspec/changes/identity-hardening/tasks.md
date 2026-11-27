@@ -1,12 +1,13 @@
 # Tasks: identity-hardening
 
-Base: `0413c9cc`. **Tidak ada kode aplikasi sebelum G1/G2 disetujui owner.**
+Base: `456eb1ad`. **Tidak ada kode aplikasi sebelum G1/G2 disetujui owner.**
 Ketergantungan melingkar G2/T1 diperbaiki: rencana tes ditulis **sebelum** approval (dokumen),
 tes merah ditulis **sesudah** approval.
 
 ## Sebelum approval (boleh sekarang, dokumen saja)
 
 - [x] T0 Rencana tes lengkap I1–I25 di `verification.md` (tanpa kode), termasuk I6b (konkurensi silang-jalur) dan I19c/I19d (replay legacy).
+- [ ] T0b Sebelum implementasi/G3: `sha256(verification.md)` pada head kerja harus sama persis dengan `PLAN_SHA256` di paket approval owner; beda → fail closed, minta approval ulang.
 
 ## Setelah G1/G2 disetujui (kode)
 

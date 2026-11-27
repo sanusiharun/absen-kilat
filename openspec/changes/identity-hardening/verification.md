@@ -1,6 +1,6 @@
 # Verification: identity-hardening
 
-Base: `0413c9cc`. Rencana tes ini **boleh** ada sebelum approval (dokumen); eksekusi tes butuh G1/G2.
+Base: `456eb1ad` (main setelah PR #69; CI backend/frontend/structure success). Rencana tes ini **boleh** ada sebelum approval (dokumen); eksekusi tes butuh G1/G2.
 
 ## Gate evidence
 
@@ -27,6 +27,25 @@ butuh persetujuan owner terpisah; belum dilakukan.
 
 Yang dilaporkan di setiap gerbang: `base_sha` (commit yang di-review), `head_sha`, digest G1/G2 penuh,
 `PLAN_SHA256`, keluaran `validate_sdd.py` (termasuk `STRUCTURE PASS`), dan `pytest tools/tests`.
+
+## Paket approval dan binding plan hash
+
+Paket approval final WAJIB dikirim owner lewat **DM Telegram tepercaya** (laporan GitHub saja bukan approval)
+dan memuat eksplisit: `change=identity-hardening`, `gate=G1|G2`, `base_sha`, `head_sha` yang di-review,
+digest G1/G2 penuh, dan `PLAN_SHA256 = sha256(verification.md)`.
+
+- Implementasi/G3 hanya boleh mulai bila `sha256(verification.md)` pada head kerja **sama persis** dengan
+  `PLAN_SHA256` di paket approval; beda → fail closed, minta approval ulang.
+- `base_sha` harus ancestor dari `head_sha` (`git merge-base --is-ancestor`); head yang di-review tidak boleh
+  bergeser tanpa approval baru.
+- Slice ini **tidak** mengubah validator repo-wide (`tools/validate_sdd.py`); memasukkan `verification.md`
+  ke G2 tetap usulan terpisah yang butuh persetujuan owner.
+
+## Kebijakan jendela migrasi legacy
+
+- `LEGACY_REFRESH_ACCEPT_UNTIL` = tanggal rilis aktual + **maksimum 7 hari**, tidak boleh diperpanjang.
+- `exp` JWT legacy tidak boleh diubah/diperpanjang untuk mengakomodasi jendela migrasi.
+- Alternatif bila 7 hari tidak cukup: paksa login ulang (forced reauth), bukan memperpanjang token.
 
 ## Matriks tes negatif (role dan permission)
 

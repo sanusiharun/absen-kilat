@@ -189,8 +189,11 @@ COMMIT;
   double-refresh klien di jalur legacy berarti 401 + family dicabut + login ulang sekali; itu konsekuensi
   yang diterima dan dibatasi oleh single-flight klien (T9) serta oleh umur jendela migrasi yang pendek.
   Memberi grace di sini akan membuat JWT legacy bisa dipakai berulang — persis yang dilarang.
-- Jendela penerimaan dibatasi `LEGACY_REFRESH_ACCEPT_UNTIL` (default: 7 hari setelah deploy, diisi saat
-  rilis). Setelah itu jalur legacy mati; token sisa ditolak dan pengguna login ulang. Baris
+- Jendela penerimaan dibatasi `LEGACY_REFRESH_ACCEPT_UNTIL` = **tanggal rilis aktual + maksimum 7 hari**,
+  diisi saat rilis dan **tidak boleh diperpanjang**. `exp` JWT legacy **tidak pernah** diubah atau
+  diperpanjang untuk mengakomodasi jendela migrasi; token yang sudah lewat `exp` tetap ditolak. Bila 7 hari
+  tidak cukup, alternatif yang sah adalah paksa login ulang (forced reauth), bukan memperpanjang masa token.
+  Setelah cut-off jalur legacy mati; token sisa ditolak dan pengguna login ulang. Baris
   `legacy_refresh_consumed` dipangkas 7 hari setelah cut-off (tidak ada lagi penukaran yang mungkin).
 - Bila metrik `legacy_refresh` sudah nol, jalur legacy + tabel penandanya dihapus pada rilis berikutnya.
 - Rollback: hentikan penerbitan token baru, biarkan tabel ada (tidak merusak data).
