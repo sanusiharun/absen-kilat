@@ -104,3 +104,23 @@ Digest pra-revisi (b41a5ddf…/43e0afbe…/1ce67194…/e1645da2…) **tidak berl
 - `validate_sdd.py` → STRUCTURE PASS; `python3 -m unittest discover -s tools/tests` → lihat laporan GitHub.
 - `PLAN_SHA256` revisi ini dicatat di laporan GitHub, bukan di file ini. Approval lama (revisi 5/6) otomatis tidak valid.
 - G1/G2 tetap **PENDING**; tidak ada merge, deploy, worker dispatch, perubahan credential, atau biaya.
+
+## Revisi 8 — audit review #58 (`7230321970`) atas head `2ffb618` + `67eca9f`
+
+- Review `7230321970` menyebut head `2ffb618dd765332a44170ae038b3b0c3b19bd3f6`; head aktual branch saat audit
+  adalah `67eca9f52c9714afcb4fad5fb7d706e933bba939` (§7 kanal approval Telegram-only, commit terpisah).
+  Base PR tetap `main` = `6785ec30de20406536eff73b71610434ce202598` (diverifikasi ancestor).
+- Verifikasi hash ulang pada commit ini (bukan salinan dari revisi sebelumnya):
+  `validate_sdd.py --digest mv-agentic-runtime G1` → `230db064b25417dd2dfc0e852a0bc9ecf2d1907f5a0f835edc44185dc5043fde`,
+  `G2` → `c0a9cc334516263dfcd52d2d336c7bbdcd6010fd83c642d707999ac7b2986ac0` (sama dengan revisi 7 ⇒ tidak ada drift artefak gate).
+- Scope PR diverifikasi memuat spec identity + backlog: `openspec/changes/identity-hardening/{proposal,design,tasks,verification}.md`,
+  `openspec/changes/identity-hardening/specs/identity-hardening/spec.md`, `docs/reengineering/backlog/INTEGRATED-BACKLOG.md`.
+- `AUTONOMY_POLICY.md` §7 menetapkan Telegram DM sebagai satu-satunya kanal approval; GitHub hanya koordinasi/audit trail.
+- **Open item (butuh approval owner, tidak diubah di slice ini):** `docs/reengineering/engineering/APPROVAL_PROTOCOL.md`
+  masih menyebut "human-authored GitHub comments or equivalent verified owner records" — mismatch dengan §7/D5.
+  Perubahan teks approval adalah perubahan kebijakan keamanan (hard gate §2), jadi tidak ditulis sepihak;
+  usulan delta menunggu keputusan owner lewat Telegram. Tidak ada gate yang boleh bersandar pada kalimat lama itu.
+- **Open item:** digest policy `sha256:50da828d…` tetap hanya *declared* (tidak reproducible dari repo); bentuk kanonik
+  `CONTROLLED_AUTONOMY_V1.md` masih menunggu konfirmasi owner.
+- Credential containment tetap owner-led via DM privat; dokumen ini tidak memuat nilai kredensial, secret, atau PII.
+- G1/G2 tetap **PENDING**; tidak ada merge, deploy, worker dispatch, atau biaya pada revisi ini.
