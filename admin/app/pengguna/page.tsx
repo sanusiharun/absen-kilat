@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, clearToken, getToken } from "@/lib/api";
 import AdminShell from "@/components/admin-shell";
 import { Icon } from "@/components/icons";
+import MenuAccessModal from "@/components/menu-access";
 import { Avatar, Card, CardHeader, ErrorBanner, Pill, Spinner, inputCls } from "@/components/ui";
 import { Select } from "@/components/fields";
 
@@ -64,6 +65,8 @@ export default function PenggunaPage() {
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
 
   // Edit-user modal
+  // User yang sedang diatur akses menunya (modal Akses Menu).
+  const [accessUser, setAccessUser] = useState<AdminUser | null>(null);
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [editFormError, setEditFormError] = useState("");
@@ -335,6 +338,15 @@ export default function PenggunaPage() {
                     </td>
                     <td className="px-6 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAccessUser(u)}
+                          title="Atur menu yang boleh dibuka user ini"
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                        >
+                          <Icon name="shield" className="h-3.5 w-3.5" />
+                          Akses
+                        </button>
                         <button
                           type="button"
                           disabled={isBusy(u.id)}
@@ -684,6 +696,10 @@ export default function PenggunaPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {accessUser && (
+        <MenuAccessModal userId={accessUser.id} onClose={() => setAccessUser(null)} />
       )}
     </AdminShell>
   );

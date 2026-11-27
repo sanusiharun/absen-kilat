@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, setToken } from "@/lib/api";
+import { api, getToken, setTokens } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,19 +10,37 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Pesan sesi berakhir dibaca dari query (?expired=1 / ?required=1) lewat
+  // window.location supaya halaman tetap bisa diprerender statis.
+  const [notice, setNotice] = useState("");
+  const [nextPath, setNextPath] = useState("/dashboard");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state (pola sama dengan PR #22).
+    if (params.get("expired") === "1") setNotice("Sesi Anda berakhir. Silakan masuk kembali.");
+    else if (params.get("required") === "1") setNotice("Silakan masuk untuk melanjutkan.");
+    const next = params.get("next");
+    if (next && next.startsWith("/") && !next.startsWith("/login")) setNextPath(next);
+    // Sudah punya token dan tidak sedang dipaksa login ulang? langsung lanjut.
+    if (!params.get("expired") && !params.get("required") && getToken()) {
+      window.location.replace(next && next.startsWith("/") ? next : "/dashboard");
+    }
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const d = await api<{ access_token: string }>("/auth/login", {
+      const d = await api<{ access_token: string; refresh_token?: string }>("/auth/login", {
         method: "POST",
         auth: false,
         body: JSON.stringify({ email, password }),
       });
-      setToken(d.access_token);
-      router.replace("/dashboard");
+      // Simpan access + refresh: access hanya 15 menit, refresh 30 hari.
+      setTokens(d.access_token, d.refresh_token);
+      router.replace(nextPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login gagal");
     } finally {
@@ -49,6 +67,14 @@ export default function LoginPage() {
           className="rounded-2xl bg-white p-8 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800"
         >
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Masuk</h1>
+          {notice && (
+            <div
+              role="status"
+              className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300"
+            >
+              {notice}
+            </div>
+          )}
           <p className="mb-6 mt-1 text-sm text-slate-600 dark:text-slate-400">
             Gunakan akun admin untuk mengakses dashboard.
           </p>
