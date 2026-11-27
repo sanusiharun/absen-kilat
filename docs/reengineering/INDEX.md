@@ -1,5 +1,5 @@
 # Reengineering index
-Baseline source: c85edc9a96c637037f16e838592a6016902670c9. Feature documents under features/ are discovery baselines, not approved requirements. Existing design docs remain references; HANDOFF.md may be stale.
+Baseline source: d082b13493c80c55660bba8e0ce93a224fa424a1 (merge PR #22; sebelumnya c85edc9a). Feature documents under features/ are discovery baselines, not approved requirements. Existing design docs remain references; HANDOFF.md may be stale.
 - engineering/CONSTITUTION.md
 - engineering/WORKFLOW.md
 - engineering/AGENT_PROTOCOL.md
