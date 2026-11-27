@@ -121,16 +121,20 @@ func (s *AdminService) UpdateUser(ctx context.Context, targetID, actorID string,
 	if err != nil {
 		return nil, err
 	}
-	if targetID == actorID {
-		if up.IsActive != nil && !*up.IsActive {
-			return nil, pkgerrors.Forbidden("you cannot deactivate your own account")
-		}
-		if up.Role != nil && isAdminRole(u.Role) && !isAdminRole(*up.Role) {
-			return nil, pkgerrors.Forbidden("you cannot revoke your own admin role")
-		}
+	if targetID == actorID && up.IsActive != nil && !*up.IsActive {
+		return nil, pkgerrors.Forbidden("you cannot deactivate your own account")
 	}
 	if up.Role != nil {
-		u.Role = *up.Role
+		if err := s.guardRoleAssignment(ctx, actorID, u, *up.Role); err != nil {
+			return nil, err
+		}
+		newRole := *up.Role
+		if err := s.guardLastSuperAdmin(ctx, u, newRole, up.IsActive); err != nil {
+			return nil, err
+		}
+		u.Role = newRole
+	} else if err := s.guardLastSuperAdmin(ctx, u, "", up.IsActive); err != nil {
+		return nil, err
 	}
 	if up.IsActive != nil {
 		u.IsActive = *up.IsActive
@@ -434,6 +438,11 @@ type CreateUserInput struct {
 	Name         string
 	Role         domain.UserRole
 	EmployeeCode string
+	// ActorID dan ActorRole diisi oleh transport dari identitas pemanggil,
+	// bukan dari body JSON: keduanya dipakai untuk menegakkan batas kewenangan
+	// pemberian role (change identity-hardening).
+	ActorID   string
+	ActorRole domain.UserRole
 }
 
 // CreateUser creates a new account on behalf of an admin. The account starts
@@ -457,6 +466,11 @@ func (s *AdminService) CreateUser(ctx context.Context, in CreateUserInput) (*dom
 	}
 	if in.Role == "" {
 		in.Role = domain.RoleEmployee
+	}
+	if in.ActorID != "" {
+		if err := s.guardRoleAssignment(ctx, in.ActorID, nil, in.Role); err != nil {
+			return nil, err
+		}
 	}
 	in.EmployeeCode = strings.TrimSpace(in.EmployeeCode)
 
@@ -492,6 +506,71 @@ func parseRFC3339Nano(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// privilegeRank orders roles by privilege level. Unknown roles rank lowest so a
+// typo can never widen access. Satu-satunya sumber urutan; tidak ada
+// perbandingan string role yang tersebar.
+func privilegeRank(r domain.UserRole) int {
+	switch r {
+	case domain.RoleSuperAdmin:
+		return 40
+	case domain.RoleHR:
+		return 30
+	case domain.RoleSupervisor:
+		return 20
+	case domain.RoleEmployee:
+		return 10
+	}
+	return 0
+}
+
+// guardRoleAssignment enforces identity-hardening R1/R6: hanya super_admin aktif
+// yang boleh menyentuh role admin, dan role akun sendiri tidak pernah bisa diubah.
+func (s *AdminService) guardRoleAssignment(ctx context.Context, actorID string, target *domain.User, newRole domain.UserRole) error {
+	actor, err := s.users.FindByID(ctx, actorID)
+	if err != nil {
+		return err
+	}
+	if target != nil && target.ID == actor.ID {
+		return pkgerrors.Forbidden("role akun sendiri tidak dapat diubah")
+	}
+	if newRole == "" || actor.Role == domain.RoleSuperAdmin {
+		return nil
+	}
+	targetRank := 0
+	if target != nil {
+		targetRank = privilegeRank(target.Role)
+	}
+	if privilegeRank(newRole) >= privilegeRank(domain.RoleHR) || targetRank >= privilegeRank(domain.RoleHR) {
+		return pkgerrors.Forbidden("hanya super admin yang boleh mengubah atau memberikan role hr maupun super_admin")
+	}
+	if privilegeRank(newRole) > privilegeRank(actor.Role) {
+		return pkgerrors.Forbidden("role yang diminta melebihi kewenangan Anda")
+	}
+	return nil
+}
+
+// guardLastSuperAdmin rejects a change that would leave no active super_admin
+// (identity-hardening R7). Catatan: hitung-lalu-update belum atomik; guard
+// transaksional ada di tiket lanjutan I6.
+func (s *AdminService) guardLastSuperAdmin(ctx context.Context, target *domain.User, newRole domain.UserRole, newActive *bool) error {
+	if target == nil || target.Role != domain.RoleSuperAdmin || !target.IsActive {
+		return nil
+	}
+	losesSuper := newRole != "" && newRole != domain.RoleSuperAdmin
+	deactivates := newActive != nil && !*newActive
+	if !losesSuper && !deactivates {
+		return nil
+	}
+	remaining, err := s.users.CountActiveSuperAdminsExcluding(ctx, target.ID)
+	if err != nil {
+		return err
+	}
+	if remaining == 0 {
+		return pkgerrors.Validation("role", "perubahan ditolak: harus tersisa minimal satu super admin aktif")
+	}
+	return nil
 }
 
 // isAdminRole reports whether the role has full admin-dashboard privileges
@@ -760,8 +839,8 @@ func validateLocationFields(name, typ string, lat, lng float64, radiusM int) err
 // override. Reason is always required and recorded in the approval log.
 type OverrideInput struct {
 	Type           *domain.AttendanceType
-	Status         *domain.AttendanceStatus  // on_time | late
-	ApprovalStatus *domain.ApprovalStatus    // pending | approved | rejected
+	Status         *domain.AttendanceStatus // on_time | late
+	ApprovalStatus *domain.ApprovalStatus   // pending | approved | rejected
 	OccurredAt     *time.Time
 	Reason         string
 }

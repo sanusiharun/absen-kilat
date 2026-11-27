@@ -232,6 +232,7 @@ func (h *AdminHandler) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, err := h.svc.CreateUser(r.Context(), service.CreateUserInput{
+		ActorID:      UserIDFromContext(r.Context()),
 		Email:        body.Email,
 		Password:     body.Password,
 		Name:         body.Name,
@@ -738,18 +739,18 @@ func (h *AdminHandler) approvals(w http.ResponseWriter, r *http.Request) {
 	resp := make([]map[string]any, 0, len(list))
 	for _, a := range list {
 		resp = append(resp, map[string]any{
-			"id":               a.ID,
-			"user_id":          a.UserID,
-			"user_name":        a.UserName,
-			"user_email":       a.UserEmail,
-			"type":             string(a.Type),
-			"status":           string(a.Status),
-			"photo_url":        a.PhotoURL,
-			"address":          a.Address,
-			"source":           string(a.Source),
-			"approval_status":  string(a.ApprovalStatus),
-			"location_id":      a.LocationID,
-			"occurred_at":      a.OccurredAt.Format(time.RFC3339),
+			"id":              a.ID,
+			"user_id":         a.UserID,
+			"user_name":       a.UserName,
+			"user_email":      a.UserEmail,
+			"type":            string(a.Type),
+			"status":          string(a.Status),
+			"photo_url":       a.PhotoURL,
+			"address":         a.Address,
+			"source":          string(a.Source),
+			"approval_status": string(a.ApprovalStatus),
+			"location_id":     a.LocationID,
+			"occurred_at":     a.OccurredAt.Format(time.RFC3339),
 		})
 	}
 	httpx.WriteOK(w, map[string]any{"approvals": resp, "total": total})
