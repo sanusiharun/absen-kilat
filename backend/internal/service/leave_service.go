@@ -45,6 +45,11 @@ func (s *LeaveService) Apply(ctx context.Context, in LeaveInput) (*domain.Leave,
 	if err != nil {
 		return nil, pkgerrors.Validation("leave", "tipe cuti tidak valid")
 	}
+	// A repository may resolve nothing without returning an error; without this
+	// guard the service dereferences a nil *LeaveType further down.
+	if lt == nil {
+		return nil, pkgerrors.Validation("leave", "tipe cuti tidak valid")
+	}
 
 	// Validate date format + ordering.
 	start, err := time.Parse("2006-01-02", in.StartDate)
@@ -88,7 +93,7 @@ func (s *LeaveService) Apply(ctx context.Context, in LeaveInput) (*domain.Leave,
 		return nil, err
 	}
 	if len(overlapping) > 0 {
-		return nil, pkgerrors.Conflict("leave","date_range","overlap")
+		return nil, pkgerrors.Conflict("leave", "date_range", "overlap")
 	}
 
 	// Validate remaining quota (annual leave only uses leave_quota).
@@ -108,16 +113,16 @@ func (s *LeaveService) Apply(ctx context.Context, in LeaveInput) (*domain.Leave,
 	}
 
 	l := &domain.Leave{
-		UserID:     in.UserID,
-		LeaveType:  lt.Code,
-		StartDate:  in.StartDate,
-		EndDate:    in.EndDate,
-		TotalDays:  totalDays,
-		Reason:     strings.TrimSpace(in.Reason),
-		Status:     domain.LeavePending,
-		ExtraDays:  in.ExtraDays,
-		CreatedAt:  time.Now().UTC(),
-		UpdatedAt:  time.Now().UTC(),
+		UserID:    in.UserID,
+		LeaveType: lt.Code,
+		StartDate: in.StartDate,
+		EndDate:   in.EndDate,
+		TotalDays: totalDays,
+		Reason:    strings.TrimSpace(in.Reason),
+		Status:    domain.LeavePending,
+		ExtraDays: in.ExtraDays,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
 	}
 	if err := s.repo.Create(ctx, l); err != nil {
 		return nil, err
@@ -142,7 +147,7 @@ func (s *LeaveService) Approve(ctx context.Context, id, actorID string) (*domain
 		return nil, err
 	}
 	if l.Status != domain.LeavePending {
-		return nil, pkgerrors.Conflict("leave","status","already_processed")
+		return nil, pkgerrors.Conflict("leave", "status", "already_processed")
 	}
 	now := time.Now().UTC()
 	if err := s.repo.UpdateStatus(ctx, id, string(domain.LeaveApproved), actorID, "", &now); err != nil {
@@ -161,7 +166,7 @@ func (s *LeaveService) Reject(ctx context.Context, id, actorID, reason string) (
 		return nil, err
 	}
 	if l.Status != domain.LeavePending {
-		return nil, pkgerrors.Conflict("leave","status","already_processed")
+		return nil, pkgerrors.Conflict("leave", "status", "already_processed")
 	}
 	now := time.Now().UTC()
 	if err := s.repo.UpdateStatus(ctx, id, string(domain.LeaveRejected), actorID, reason, &now); err != nil {

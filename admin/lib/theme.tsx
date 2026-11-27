@@ -29,6 +29,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     try {
       const stored = window.localStorage.getItem(THEME_KEY);
       if (stored === "dark" || stored === "light") {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
         setThemeState(stored);
       } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
         setThemeState("dark");

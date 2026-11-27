@@ -18,14 +18,7 @@ jobs:
           go-version-file: backend/go.mod
       - name: build
         run: go build ./...
-      # Catatan jujur: 4 tes berikut SUDAH gagal di main (fixture bertanggal hardcoded
-      # + satu panic), jadi langkah ini dibiarkan tidak memblokir supaya sinyal CI
-      # tetap berguna. Perbaiki fixture-nya (pakai tanggal relatif), lalu hapus
-      # continue-on-error ini:
-      #   TestApplyAnnualLeaveWorkdays · TestApplyRejectsWeekendSpanCount
-      #   TestApplyPaternityDynamic  · TestApproveRejectFlow
-      - name: test (lihat catatan known-failure di atas)
-        continue-on-error: true
+      - name: test
         run: go test ./...
 
   frontend:
@@ -40,6 +33,16 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: admin/package-lock.json
-      - run: npm ci
+      # package-lock.json menyimpan URL tarball. Kalau lockfile dibuat di mesin
+      # yang memakai mirror npm internal, URL-nya tidak bisa dijangkau runner CI
+      # dan `npm ci` mati dengan pesan menyesatkan "Exit handler never called!".
+      # Jaga supaya lockfile tetap menunjuk registry publik.
+      - name: guard package-lock registry
+        run: |
+          if grep -qE 'mirrors?\.|tencentyun|npmmirror' package-lock.json; then
+            echo "::error file=admin/package-lock.json::Lockfile memuat URL registry internal (tidak terjangkau runner CI). Jalankan: npm install --registry=https://registry.npmjs.org/"
+            exit 1
+          fi
+      - run: npm ci --no-audit --no-fund
       - run: npm run lint -- --max-warnings=0
       - run: npm run build

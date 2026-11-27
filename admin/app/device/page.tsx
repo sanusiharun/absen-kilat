@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, clearToken, getToken } from "@/lib/api";
 import AdminShell from "@/components/admin-shell";
 import { Icon } from "@/components/icons";
-import { Card, CardHeader, Empty, ErrorBanner, Pill, Spinner } from "@/components/ui";
+import { Card, CardHeader, ErrorBanner, Pill, Spinner } from "@/components/ui";
 
 type DeviceStat = { device: string; count: number };
 
@@ -37,6 +37,7 @@ export default function DevicePage() {
   }, [router]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
     load();
   }, [load]);
 

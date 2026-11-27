@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,34 @@ func (f *fakeLeaveRepo) UpdateStatus(ctx context.Context, id, status, actorID, r
 func (f *fakeLeaveRepo) SetAttachment(ctx context.Context, id, path string) error { return nil }
 
 var errNotFound = errors.New("not found")
+
+// ---- date fixtures -------------------------------------------------------
+// Fixtures must be relative to today: this file used to hard-code August 2026
+// and every date-dependent test started failing once the calendar passed them.
+func dstr(t time.Time) string { return t.Format("2006-01-02") }
+
+// nextWeekday returns the first date strictly after today that falls on wd,
+// so "future" assertions stay valid no matter when the suite runs.
+func nextWeekday(wd time.Weekday) time.Time {
+	today := time.Now()
+	for i := 1; i <= 7; i++ {
+		if d := today.AddDate(0, 0, i); d.Weekday() == wd {
+			return d
+		}
+	}
+	return today.AddDate(0, 0, 7)
+}
+
+// nextWeekdayAfter returns the first date more than minDays after from that
+// falls on wd (used to build Thu..Mon style spans).
+func nextWeekdayAfter(from time.Time, minDays int, wd time.Weekday) time.Time {
+	for i := minDays; i <= minDays+7; i++ {
+		if d := from.AddDate(0, 0, i); d.Weekday() == wd {
+			return d
+		}
+	}
+	return from.AddDate(0, 0, minDays+7)
+}
 
 // fakeLeaveTypeRepo returns fixed leave types.
 type fakeLeaveTypeRepo struct{}
@@ -116,8 +145,9 @@ func newTestLeaveSvc(quota int) *LeaveService {
 func TestApplyAnnualLeaveWorkdays(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(12)
-	// Mon 2026-08-17 .. Fri 2026-08-21 (5 working days).
-	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-24", EndDate: "2026-08-28", Reason: "liburan"})
+	// Monday .. Friday of next week (5 working days).
+	monday := nextWeekday(time.Monday)
+	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: dstr(monday), EndDate: dstr(monday.AddDate(0, 0, 4)), Reason: "liburan"})
 	if err != nil {
 		t.Fatalf("apply failed: %v", err)
 	}
@@ -132,8 +162,9 @@ func TestApplyAnnualLeaveWorkdays(t *testing.T) {
 func TestApplyRejectsWeekendSpanCount(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(12)
-	// Fri 2026-08-21 .. Tue 2026-08-25 covers Sat/Sun -> 3 working days.
-	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-21", EndDate: "2026-08-25", Reason: "x"})
+	// Friday .. Tuesday covers Sat/Sun -> 3 working days.
+	friday := nextWeekday(time.Friday)
+	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: dstr(friday), EndDate: dstr(friday.AddDate(0, 0, 4)), Reason: "x"})
 	if err != nil {
 		t.Fatalf("apply failed: %v", err)
 	}
@@ -145,7 +176,8 @@ func TestApplyRejectsWeekendSpanCount(t *testing.T) {
 func TestApplyPaternityDynamic(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(12)
-	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "paternity", StartDate: "2026-08-24", EndDate: "2026-08-24", ExtraDays: 7})
+	day := nextWeekday(time.Monday)
+	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "paternity", StartDate: dstr(day), EndDate: dstr(day), ExtraDays: 7})
 	if err != nil {
 		t.Fatalf("paternity apply failed: %v", err)
 	}
@@ -167,30 +199,56 @@ func TestApplyStartInPastRejected(t *testing.T) {
 func TestApplyQuotaExceeded(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(2) // quota 2 days
-	_, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-24", EndDate: "2026-08-28", Reason: "x"})
+	monday := nextWeekday(time.Monday)
+	_, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: dstr(monday), EndDate: dstr(monday.AddDate(0, 0, 4)), Reason: "x"})
 	if err == nil {
 		t.Fatal("expected quota error, got nil")
+	}
+	// Must fail because of the quota, not because the fixture drifted into the past.
+	if !strings.Contains(err.Error(), "kuota") {
+		t.Fatalf("expected quota error, got %v", err)
 	}
 }
 
 func TestApplyEndBeforeStart(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(12)
-	_, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-21", EndDate: "2026-08-17", Reason: "x"})
+	start := nextWeekday(time.Monday)
+	_, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: dstr(start), EndDate: dstr(start.AddDate(0, 0, -4)), Reason: "x"})
 	if err == nil {
 		t.Fatal("expected end<start error")
+	}
+	if !strings.Contains(err.Error(), "selesai") {
+		t.Fatalf("expected end-before-start error, got %v", err)
 	}
 }
 
 func TestApproveRejectFlow(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestLeaveSvc(12)
-	l, _ := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: "2026-08-17", EndDate: "2026-08-19", Reason: "x"})
+	monday := nextWeekday(time.Monday)
+	l, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "annual", StartDate: dstr(monday), EndDate: dstr(monday.AddDate(0, 0, 2)), Reason: "x"})
+	if err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
 	appr, err := svc.Approve(ctx, l.ID, "admin1")
 	if err != nil {
 		t.Fatalf("approve failed: %v", err)
 	}
 	if appr.Status != domain.LeaveApproved {
 		t.Fatalf("expected approved, got %s", appr.Status)
+	}
+}
+
+// TestApplyUnknownLeaveTypeNoPanic guards the case where the type repository
+// resolves nothing without returning an error: the service must reject it
+// instead of dereferencing a nil *LeaveType.
+func TestApplyUnknownLeaveTypeNoPanic(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestLeaveSvc(12)
+	day := nextWeekday(time.Monday)
+	_, err := svc.Apply(ctx, LeaveInput{UserID: "u1", TypeCode: "tidak-ada", StartDate: dstr(day), EndDate: dstr(day), Reason: "x"})
+	if err == nil {
+		t.Fatal("expected invalid-type error, got nil")
 	}
 }

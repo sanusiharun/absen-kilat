@@ -61,7 +61,7 @@ function QrForm() {
         body: fd,
       });
 
-      let body: any = null;
+      let body: { error?: { code?: string; message?: string } } | null = null;
       try {
         body = await res.json();
       } catch {}
