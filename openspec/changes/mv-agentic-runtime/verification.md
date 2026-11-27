@@ -49,3 +49,15 @@ dan wajib dicatat ulang di issue; approval lama otomatis tidak valid.
 
 Any check not executed must be listed with the reason. Static inspection never substitutes
 for execution (`VERIFICATION.md`).
+
+## Digest kanonik (revisi 5, base final)
+
+- Base final: `d082b13493c80c55660bba8e0ce93a224fa424a1` (main setelah PR #22, ancestor terverifikasi)
+- Rekonsiliasi: merge `origin/main` ke branch (commit `43a8c4f`), tanpa force push
+- Koreksi doc-only: `815e6fa` (reservasi penuh 50000, fail closed, N13)
+- Cleanup artefak: `5fc9ec4` (`__pycache__`/`*.pyc` tidak lagi dilacak)
+- `validate_sdd.py --digest mv-agentic-runtime G1` -> `230db064b25417dd2dfc0e852a0bc9ecf2d1907f5a0f835edc44185dc5043fde`
+- `validate_sdd.py --digest mv-agentic-runtime G2` -> `2e7742802a232948259672d1299e1daf453e096289cef561edfc1442e4b01db3`
+- `validate_sdd.py` -> STRUCTURE PASS · `python3 -m unittest discover -s tools/tests` -> 5 tests OK
+
+Digest pra-revisi (b41a5ddf…/43e0afbe…/1ce67194…/e1645da2…) **tidak berlaku lagi** dan tidak boleh dipakai untuk persetujuan.
