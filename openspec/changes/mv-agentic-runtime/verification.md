@@ -44,6 +44,7 @@ wajib mencatat ulang nilai di issue; approval lama otomatis tidak valid.
 | N11 | Token telemetry unavailable | run records `telemetry=unavailable` **and** `reservation=50000`; remaining budget 0 |
 | N13 | Dispatch after reservation-exhausted budget | exits 21, no worker started, no automatic retry |
 | N14 | Crash between reservation hold and worker launch | no worker, exit 21, reservation stays held |
+| N15 | Credential path resolves inside repo or agent workspace | refused, exit 21, no worker (R9) |
 | N12 | Approval relayed by an agent account (shared token) | rejected; requires human-only channel |
 
 ## Positive dry run (after G2)
@@ -91,3 +92,15 @@ Digest pra-revisi (b41a5ddf…/43e0afbe…/1ce67194…/e1645da2…) **tidak berl
 - `validate_sdd.py` → STRUCTURE PASS; `python3 -m unittest discover -s tools/tests` → 5 tests OK
 - `PLAN_SHA256` dihitung pada commit revisi ini dan dicatat di laporan GitHub, bukan di file ini.
 - Tidak ada kode aplikasi, worker dispatch, merge, deploy, atau biaya.
+
+## Revisi 7 — rekonsiliasi main `6785ec3` + ID tes unik
+
+- Base verifikasi terbaru: `6785ec30de20406536eff73b71610434ce202598` (main setelah PR #70; PR #69 sudah termasuk).
+- Rekonsiliasi non-destruktif: `origin/main` di-merge ke `docs/sdd-mv-agentic-runtime` ⇒ merge commit `6e9cf65`; tanpa force push dan tanpa menulis ulang riwayat.
+- Koreksi ID tes: tes isolasi kredensial R9 sebelumnya memakai `N14` (bentrok) ⇒ diganti `N15`. `N14` tetap = crash antara reservation hold dan worker launch (tasks 5.5, tidak berubah).
+- `tasks.md` 6.7 memetakan R9/N15 (dokumen saja; belum ada implementasi).
+- `validate_sdd.py --digest mv-agentic-runtime G1` → `230db064b25417dd2dfc0e852a0bc9ecf2d1907f5a0f835edc44185dc5043fde` (tidak berubah; `proposal.md` tidak disentuh)
+- `validate_sdd.py --digest mv-agentic-runtime G2` → `c0a9cc334516263dfcd52d2d336c7bbdcd6010fd83c642d707999ac7b2986ac0`
+- `validate_sdd.py` → STRUCTURE PASS; `python3 -m unittest discover -s tools/tests` → lihat laporan GitHub.
+- `PLAN_SHA256` revisi ini dicatat di laporan GitHub, bukan di file ini. Approval lama (revisi 5/6) otomatis tidak valid.
+- G1/G2 tetap **PENDING**; tidak ada merge, deploy, worker dispatch, perubahan credential, atau biaya.

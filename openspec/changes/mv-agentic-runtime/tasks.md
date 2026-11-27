@@ -44,6 +44,8 @@ Change ID: `mv-agentic-runtime`. No implementation authorized before G2.
 - [ ] 6.4 Out-of-scope diff ⇒ outcome `failed`, evidence attached, no auto-retry.
 - [ ] 6.5 Kill mid-run ⇒ worktree quarantined, outcome `uncertain`, re-dispatch needs human note.
 - [ ] 6.6 Test: kill during a long task leaves no duplicate dispatch and no lost commits.
+- [ ] 6.7 Test negative: `credential_path` di dalam repo/workspace agent ⇒ dispatch menolak
+      (exit 21), tidak ada worker dijalankan (R9/N15); N14 tetap tes crash reservasi anggaran.
 
 ## 7. Coordinator CLI and wiring
 - [ ] 7.1 `dispatch` refuses unless lease + approvals + budget all valid (single exit path).

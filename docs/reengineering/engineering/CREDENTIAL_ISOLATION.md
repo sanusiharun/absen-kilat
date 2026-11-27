@@ -45,14 +45,14 @@ menjalankan worker dan membaca budget/lease:
 - **R9 (baru)** — Runtime SHALL menerima path kredensial dari konfigurasi, SHALL menolak start bila
   path berada di dalam workspace agent atau di dalam repository, dan SHALL tidak pernah menulis
   kredensial ke log/komentar.
-- **N14 (tes negatif baru)** — konfigurasi yang menunjuk path kredensial di dalam workspace/repo ⇒
-  runtime menolak (exit 21) tanpa menjalankan worker.
+- **N15 (tes negatif baru; N14 tetap tes crash reservasi anggaran)** — konfigurasi yang menunjuk
+  path kredensial di dalam workspace/repo ⇒ runtime menolak (exit 21) tanpa menjalankan worker.
 - Karena spec berubah, **digest G1/G2 `mv-agentic-runtime` berubah** dan perlu disetujui ulang.
 
 ## 5. Langkah yang bisa dieksekusi tanpa approval baru (low-risk, dokumentasi)
 
 - Dokumen ini (kebijakan + temuan).
-- Menambahkan requirement R9 + tes N14 ke change runtime (dokumen).
+- Menambahkan requirement R9 + tes N15 ke change runtime (dokumen).
 - Mencatat larangan menaruh rahasia di workspace agent pada `AUTONOMY_POLICY`.
 
 ## 6. Langkah yang MEMBUTUHKAN approval owner (security-sensitive)
