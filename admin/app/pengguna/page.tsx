@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, clearToken, getToken } from "@/lib/api";
 import AdminShell from "@/components/admin-shell";
@@ -61,8 +61,7 @@ export default function PenggunaPage() {
   const [saving, setSaving] = useState(false);
 
   // Per-row action busy state
-  const busy = useRef<Set<string>>(new Set());
-  const [, forceRender] = useState(0);
+  const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
 
   // Edit-user modal
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
@@ -102,6 +101,7 @@ export default function PenggunaPage() {
   }, [router, debouncedSearch, status]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
     load();
   }, [load]);
 
@@ -117,9 +117,8 @@ export default function PenggunaPage() {
   }, [editUser]);
 
   async function updateUser(id: string, patch: Record<string, unknown>) {
-    if (busy.current.has(id)) return;
-    busy.current.add(id);
-    forceRender((n) => n + 1);
+    if (busyIds.has(id)) return;
+    setBusyIds((prev) => new Set(prev).add(id));
     setError("");
     setSuccess("");
     try {
@@ -132,8 +131,11 @@ export default function PenggunaPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memperbarui pengguna");
     } finally {
-      busy.current.delete(id);
-      forceRender((n) => n + 1);
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   }
 
@@ -219,7 +221,7 @@ export default function PenggunaPage() {
     }
   }
 
-  const isBusy = (id: string) => busy.current.has(id);
+  const isBusy = (id: string) => busyIds.has(id);
 
   return (
     <AdminShell title="Pengguna" subtitle="Kelola akun karyawan dan admin">

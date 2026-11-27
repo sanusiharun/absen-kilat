@@ -68,7 +68,7 @@ export default function LokasiPage() {
 
   // ---- QR management (Fase C) ----
   const [qrTokens, setQrTokens] = useState<QrToken[]>([]);
-  const [qrLoading, setQrLoading] = useState(false);
+  const [qrLoading] = useState(false);
   const [qrError, setQrError] = useState("");
   const [qrSuccess, setQrSuccess] = useState("");
   const [qrBusy, setQrBusy] = useState<string | null>(null); // id token / lokasi yang sedang diproses
@@ -93,6 +93,7 @@ export default function LokasiPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
     loadQrTokens();
   }, [loadQrTokens]);
 
@@ -118,6 +119,7 @@ export default function LokasiPage() {
   }, [router]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
     load();
   }, [load]);
 
@@ -453,7 +455,7 @@ export default function LokasiPage() {
                 </div>
                 <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-slate-200">Belum ada token QR</p>
                 <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                  Klik "Buat QR" pada salah satu lokasi aktif di atas.
+                  Klik &quot;Buat QR&quot; pada salah satu lokasi aktif di atas.
                 </p>
               </div>
             ) : (
