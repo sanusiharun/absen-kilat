@@ -127,3 +127,13 @@ The runtime SHALL NOT merge, deploy or self-approve.
 - GIVEN a completed run
 - WHEN `status --json` is printed
 - THEN it reports lease/budget/approval facts but never a PASS verdict for the change
+
+### R9 — Kredensial terisolasi
+The runtime SHALL read worker credentials from a path supplied by configuration and SHALL refuse to
+start when that path resolves inside the repository or inside the agent workspace. The runtime SHALL
+never write credential material to logs, comments, or issue bodies.
+
+#### Scenario: credential path inside the workspace
+- GIVEN a configuration whose credential path resolves inside the agent workspace
+- WHEN dispatch runs
+- THEN it exits 21 and starts no worker

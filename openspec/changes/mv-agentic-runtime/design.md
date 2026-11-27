@@ -206,3 +206,10 @@ sampai telemetri tersedia; runtime harus melaporkan batas ini, bukan menyembunyi
 - Multi-coordinator + distributed lock (needs a different primitive).
 - Where runtime.db lives in CI (if ever needed).
 - Whether `openspec validate` replaces the repo's own `tools/validate_sdd.py` (see #57 plan).
+
+## 9. Isolasi kredensial (keputusan owner 2026-11-27)
+
+Runtime menerima `credential_path` dari konfigurasi. Path divalidasi: ditolak bila berada di dalam
+repository atau di dalam workspace agent (lihat `docs/reengineering/engineering/CREDENTIAL_ISOLATION.md`).
+Kredensial disuntikkan lewat environment saat eksekusi worker, tidak ditulis ke disk oleh runtime dan
+tidak pernah muncul di log/komentar. Identitas koordinator, worker, dan deployment terpisah.
