@@ -1,0 +1,2 @@
+# Recovery
+Checkpoint at dispatch, commit, verification and handoff in issue comments using non-sensitive metadata. On restart inspect issue, lease, branch head, PR and CI. Do not re-dispatch expired work until prior worker termination is confirmed; quarantine uncertain worktrees. Reconcile commits before retry. Never reset or delete unreviewed work. If approved digest or base changes, stop and replan. Duplicate event IDs must be ignored by durable runtime store (pending). Escalate unknown state to human.

@@ -1,0 +1,2 @@
+# Known baseline issues
+Existing .github/workflows/ci.yml marks backend tests continue-on-error. Its comments identify TestApplyAnnualLeaveWorkdays, TestApplyRejectsWeekendSpanCount, TestApplyPaternityDynamic and TestApproveRejectFlow as known failures. Not independently reproduced. A green existing CI is not proof of backend test success. Fix in separate approved change; do not hide failures. OpenSpec CLI compatibility and worker integration not yet verified.

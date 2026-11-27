@@ -1,0 +1,21 @@
+name: Agent task
+description: Durable SDD task record
+body:
+  - type: input
+    id: change
+    attributes:
+      label: Change ID
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope, allowed paths, acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: state
+    attributes:
+      label: State and checkpoint
+      description: Record revision, worker, lease and evidence; never include secrets or PII.
+      value: "State: queued"
