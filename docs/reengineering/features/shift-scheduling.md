@@ -97,3 +97,14 @@ Urutan wajib: S1 → S2 → S3 → (S4 paralel dengan S5) → S6 → S7.
 
 - Tes invarian: telat dari shift, early-leave, lintas tengah malam, fallback setting, dua shift/hari.
 - Uji beban: query roster untuk 500 pegawai × 90 hari.
+
+## 8. Keputusan owner (2026-11-27, DM) — MENGIKAT
+
+1. Shift ditentukan **per lokasi** lebih dulu (bukan global) — konsisten dengan geofence per lokasi.
+2. **Grace default 15 menit**, dapat dikonfigurasi per shift.
+3. `CUTOFF_HOUR` **tetap sebagai fallback** dan dihapus bertahap setelah shift terbukti stabil di produksi.
+4. Shift yang jatuh pada hari libur dihitung **lembur penuh**.
+5. Rilis pertama memakai **penugasan manual per rentang tanggal**; pola berulang (2-2-2 offshore) menyusul.
+
+Konsekuensi untuk tiket #61–#67: S1 tetap aditif dengan `grace_minutes` default 15; S3 wajib
+mempertahankan fallback `CUTOFF_HOUR` (bukan menghapusnya); S7 memakai aturan hari libur = lembur penuh.
