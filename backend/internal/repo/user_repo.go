@@ -294,3 +294,16 @@ func userFromDAO(d userDAO) domain.User {
 	}
 	return u
 }
+
+// CountActiveSuperAdminsExcluding returns the number of active super_admin rows
+// whose id is not the given one. Dipakai guard "super admin terakhir"
+// (change identity-hardening).
+func (r *UserRepository) CountActiveSuperAdminsExcluding(ctx context.Context, id string) (int, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM users WHERE role = 'super_admin' AND is_active = 1 AND id <> ?`, id).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
