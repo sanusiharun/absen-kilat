@@ -1,0 +1,3 @@
+schema: spec-driven
+context: |
+  Brownfield AbsenKilat monorepo. Follow AGENTS.md and docs/reengineering/engineering/WORKFLOW.md. Preserve observed behavior; feature baselines are discovery only.
