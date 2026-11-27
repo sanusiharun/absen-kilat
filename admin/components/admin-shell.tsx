@@ -4,9 +4,9 @@
  * Every admin page renders inside <AdminShell title=... subtitle=...>. */
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { api, clearToken, getToken } from "@/lib/api";
+import { UnauthorizedError, api, getToken, redirectToLogin } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { Icon, type IconName } from "@/components/icons";
 import { Avatar } from "@/components/ui";
@@ -24,48 +24,34 @@ export type Me = {
 
 type NavItem = { label: string; href: string; icon: IconName };
 
-const NAV_UTAMA: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: "dashboard" },
-  { label: "Pengguna", href: "/pengguna", icon: "users" },
-  { label: "Absensi", href: "/absensi", icon: "calendar-check" },
-  { label: "Laporan", href: "/laporan", icon: "chart-bar" },
-  { label: "Lokasi", href: "/lokasi", icon: "map-pin" },
-  { label: "Device", href: "/device", icon: "device" },
-  { label: "Cuti", href: "/cuti", icon: "calendar" },
-  { label: "Lembur", href: "/lembur", icon: "calendar-check" },
-  { label: "Proyek & Mitra", href: "/proyek", icon: "map-pin" },
-  { label: "Approval", href: "/approval", icon: "check-list" },
-  { label: "Profil", href: "/akun-admin", icon: "user" },
-];
+// Menu yang boleh dibuka datang dari server (GET /me/permissions), bukan dari
+// daftar hardcoded di frontend. Dengan begitu akses bisa diatur per user tanpa
+// menyentuh kode admin; backend tetap menolak route yang tidak diizinkan.
+type MenuAccess = { key: string; label: string; href: string; actions: string[] };
 
-const NAV_PENGATURAN: NavItem[] = [
-  { label: "Pengaturan", href: "/pengaturan", icon: "settings" },
-];
+const MENU_ICONS: Record<string, IconName> = {
+  dashboard: "dashboard",
+  pengguna: "users",
+  absensi: "calendar-check",
+  laporan: "chart-bar",
+  lokasi: "map-pin",
+  device: "device",
+  cuti: "calendar",
+  lembur: "calendar-check",
+  proyek: "map-pin",
+  approval: "check-list",
+  pengaturan: "settings",
+  "akun-admin": "user",
+};
 
-// Role -> menu yang boleh dilihat. Role tak dikenal / employee => akses ditolak.
+// Menu yang ditampilkan pada grup bawah (bukan grup "Menu Utama").
+const BOTTOM_MENU_KEYS = ["pengaturan"];
+
 const ROLE_KEY = "absenkilat_role";
 const ADMIN_ROLES = ["super_admin", "hr", "supervisor"];
 
-function navForRole(role: string | null): NavItem[] {
-  switch (role) {
-    case "super_admin":
-      return [...NAV_UTAMA, ...NAV_PENGATURAN];
-    case "hr":
-      return NAV_UTAMA; // semua kecuali Pengaturan
-    case "supervisor":
-      return [
-        { label: "Dashboard", href: "/dashboard", icon: "dashboard" },
-        { label: "Approval", href: "/approval", icon: "check-list" },
-        { label: "Cuti", href: "/cuti", icon: "calendar" },
-        { label: "Lembur", href: "/lembur", icon: "calendar-check" },
-        { label: "Absensi", href: "/absensi", icon: "calendar-check" },
-        { label: "Laporan", href: "/laporan", icon: "chart-bar" },
-        { label: "Profil", href: "/akun-admin", icon: "user" },
-      ];
-    default:
-      // role belum termuat / employee / tak dikenal
-      return NAV_UTAMA; // default super_admin (flash acceptable), dicek lagi setelah /me
-  }
+function toNavItem(menu: MenuAccess): NavItem {
+  return { label: menu.label, href: menu.href, icon: MENU_ICONS[menu.key] ?? "dashboard" };
 }
 
 export default function AdminShell({
@@ -80,14 +66,18 @@ export default function AdminShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const { theme, toggle } = useTheme();
   const [me, setMe] = useState<Me | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [menus, setMenus] = useState<MenuAccess[]>([]);
+  const [menusLoaded, setMenusLoaded] = useState(false);
+  // true saat sesi tidak bisa dipulihkan: tampilkan panel "sesi berakhir",
+  // bukan dashboard setengah kosong dengan banner error.
+  const [sessionEnded, setSessionEnded] = useState(false);
 
   const loadMe = useCallback(async () => {
     if (!getToken()) {
-      router.replace("/login");
+      redirectToLogin("required");
       return;
     }
     try {
@@ -97,16 +87,33 @@ export default function AdminShell({
       try {
         window.localStorage.setItem(ROLE_KEY, data.role);
       } catch {}
-    } catch (err) {
-      if (err instanceof Error && /401|403/.test(err.message)) {
-        clearToken();
-        router.replace("/login");
-          return;
+      // Menu diambil terpisah supaya kegagalan endpoint permission tidak
+      // mengeluarkan user dari sesi yang valid.
+      try {
+        const perms = await api<{ menus: MenuAccess[] }>("/me/permissions");
+        setMenus(perms.menus ?? []);
+      } catch {
+        setMenus([]);
+      } finally {
+        setMenusLoaded(true);
       }
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        // lib/api sudah membersihkan token & mengarahkan ke /login.
+        setSessionEnded(true);
+        return;
+      }
+      if (err instanceof Error && /401/.test(err.message)) {
+        redirectToLogin("expired");
+        setSessionEnded(true);
+        return;
+      }
+      // Gagal memuat /me tanpa 401: biarkan dashboard memakai data kosong.
       setMe(null);
     } finally {
+      setMenusLoaded(true);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
@@ -114,16 +121,19 @@ export default function AdminShell({
   }, [loadMe]);
 
   const logout = () => {
-    clearToken();
     try {
       window.localStorage.removeItem(ROLE_KEY);
     } catch {}
-    router.replace("/login");
+    redirectToLogin("required");
   };
 
   // Akses ditolak jika role sudah termuat dan bukan admin (employee / tak dikenal).
   const denied = role !== null && !ADMIN_ROLES.includes(role);
-  const navItems = denied ? [] : navForRole(role);
+  // Nav dirender dari permission server. Saat masih memuat, jangan tampilkan
+  // menu default apa pun supaya tidak ada menu "berkedip" yang ternyata ditolak.
+  const visibleMenus = denied || !menusLoaded ? [] : menus;
+  const navItems = visibleMenus.filter((m) => !BOTTOM_MENU_KEYS.includes(m.key)).map(toNavItem);
+  const navBottom = visibleMenus.filter((m) => BOTTOM_MENU_KEYS.includes(m.key)).map(toNavItem);
 
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === href : pathname.startsWith(href);
@@ -179,23 +189,12 @@ export default function AdminShell({
           </div>
           {navItems.map(navLink)}
 
-          {!denied && role === "super_admin" && (
+          {navBottom.length > 0 && (
             <>
               <div className="mb-1.5 mt-5 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 Pengaturan
               </div>
-              <Link
-                key="/pengaturan"
-                href="/pengaturan"
-                className={`mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                  isActive("/pengaturan")
-                    ? "bg-indigo-50 font-semibold text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-400"
-                    : "font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                }`}
-              >
-                <Icon name="settings" className="h-[18px] w-[18px]" />
-                Pengaturan
-              </Link>
+              {navBottom.map(navLink)}
             </>
           )}
         </nav>
@@ -263,7 +262,26 @@ export default function AdminShell({
         </header>
 
         <main className="p-4 md:p-8">
-          {denied ? (
+          {sessionEnded ? (
+            <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl bg-white px-6 py-14 text-center shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+                <Icon name="clock" className="h-8 w-8" />
+              </div>
+              <h2 className="mt-5 text-xl font-bold text-slate-900 dark:text-slate-100">Sesi berakhir</h2>
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                Sesi Anda sudah berakhir karena tidak ada aktivitas dalam waktu lama. Silakan masuk kembali —
+                data yang tadi sedang dibuka akan dimuat ulang setelah Anda masuk.
+              </p>
+              <button
+                type="button"
+                onClick={() => redirectToLogin("expired")}
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700"
+              >
+                <Icon name="logout" className="h-4 w-4" />
+                Masuk kembali
+              </button>
+            </div>
+          ) : denied ? (
             <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl bg-white px-6 py-14 text-center shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
               <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-400">
                 <Icon name="lock" className="h-8 w-8" />

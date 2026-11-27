@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/sanusi/absen-kilat/backend/internal/authz"
 	"github.com/sanusi/absen-kilat/backend/internal/config"
 	"github.com/sanusi/absen-kilat/backend/internal/db"
 	"github.com/sanusi/absen-kilat/backend/internal/domain"
@@ -91,6 +92,16 @@ func main() {
 	projectSvc := service.NewProjectService(partnerRepo, projectRepo, assignmentRepo, userRepo)
 	projectHandler := transport.NewProjectHandler(projectSvc)
 
+	// Access control: menu registry lives in code (internal/authz), assignments
+	// in the database (role template + per-user overrides).
+	accessRepo := repo.NewAccessRepository(pool)
+	accessResolver := authz.NewResolver(accessRepo)
+	if seeded, err := accessRepo.SeedDefaults(ctx); err != nil {
+		logger.Error("access control seed failed", "error", err)
+	} else if seeded {
+		logger.Info("access control templates seeded")
+	}
+
 	// Seed the initial admin account when configured.
 	if cfg.AdminPassword != "" {
 		if err := adminSvc.SeedAdmin(ctx, cfg.AdminPassword); err != nil {
@@ -111,6 +122,8 @@ func main() {
 	qrHandler := transport.NewQrHandler(qrSvc, photoStore)
 	appInfoHandler := transport.NewAppInfoHandler(appSvc)
 	geocodeHandler := transport.NewGeocodeHandler(geocodeSvc)
+	accessSvc := service.NewAccessService(accessRepo, userRepo, accessResolver)
+	accessHandler := transport.NewAccessHandler(accessResolver, profileSvc, accessSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -151,22 +164,27 @@ func main() {
 			leaveHandler.RegisterRoutes(r)
 			overtimeHandler.RegisterRoutes(r)
 			projectHandler.RegisterRoutes(r)
+			accessHandler.RegisterRoutes(r)
 
-			// Admin dashboard: auth + role check (super_admin | hr).
+			// Admin dashboard: auth + role check (super_admin | hr), then the
+			// fine-grained menu permission for each route.
 			r.Group(func(r chi.Router) {
 				r.Use(transport.RequireRole(profileSvc, domain.RoleSuperAdmin, domain.RoleHR))
+				r.Use(transport.Authorize(profileSvc, accessResolver))
 				adminHandler.RegisterRoutes(r)
 				adminHandler.RegisterApprovalRoutes(r)
 				qrHandler.RegisterRoutes(r)
 				leaveHandler.RegisterAdminRoutes(r)
 				overtimeHandler.RegisterAdminRoutes(r)
 				projectHandler.RegisterAdminRoutes(r)
+				accessHandler.RegisterAdminRoutes(r)
 			})
 
 			// Approval queue: supervisors see/decide their own team;
 			// super_admin and hr see everything.
 			r.Group(func(r chi.Router) {
 				r.Use(transport.RequireRole(profileSvc, domain.RoleSupervisor, domain.RoleSuperAdmin, domain.RoleHR))
+				r.Use(transport.Authorize(profileSvc, accessResolver))
 				adminHandler.RegisterApprovalRoutes(r)
 				overtimeHandler.RegisterAdminRoutes(r)
 			})
