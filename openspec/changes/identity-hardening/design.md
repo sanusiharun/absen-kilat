@@ -180,6 +180,9 @@ COMMIT;
   COMMIT;
   ```
 
+  `ROLLBACK` pada akun nonaktif **sengaja** tidak menyimpan penanda (tidak ada family yang pernah dibuatkan
+  untuk akun nonaktif, dan akun yang diaktifkan kembali masih boleh menukar sekali di dalam jendela
+  migrasi). Konflik penanda dicabut-family berlaku tanpa melihat status akun: replay selalu fail closed.
   `PRIMARY KEY` + `BEGIN IMMEDIATE` adalah yang menentukan pemenang, bukan `SELECT` lebih dulu: dua
   permintaan paralel dengan JWT yang sama hanya bisa menghasilkan satu insert, jadi hanya satu family.
 - **Tanpa grace.** Berbeda dari R3, jalur legacy **tidak** punya jendela `REFRESH_REUSE_GRACE`. Tabrakan
