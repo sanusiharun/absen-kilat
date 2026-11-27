@@ -52,8 +52,8 @@ for execution (`VERIFICATION.md`).
 
 ## Digest kanonik (revisi 5, base final)
 
-- Base final: `d082b13493c80c55660bba8e0ce93a224fa424a1` (main setelah PR #22, ancestor terverifikasi)
-- Rekonsiliasi: merge `origin/main` ke branch (commit `43a8c4f`), tanpa force push
+- Base final: `456eb1ad9732613fca56dca3b0c0c8dd8e18b652` (main setelah PR #69; CI backend/frontend/structure success)
+- Rekonsiliasi: `origin/main` sudah ancestor branch (`git merge-base --is-ancestor` ok) — merge `1fa4f04`/`43a8c4f`, tanpa force push
 - Koreksi doc-only: `815e6fa` (reservasi penuh 50000, fail closed, N13)
 - Cleanup artefak: `5fc9ec4` (`__pycache__`/`*.pyc` tidak lagi dilacak)
 - `validate_sdd.py --digest mv-agentic-runtime G1` -> `230db064b25417dd2dfc0e852a0bc9ecf2d1907f5a0f835edc44185dc5043fde`
@@ -61,3 +61,13 @@ for execution (`VERIFICATION.md`).
 - `validate_sdd.py` -> STRUCTURE PASS · `python3 -m unittest discover -s tools/tests` -> 5 tests OK
 
 Digest pra-revisi (b41a5ddf…/43e0afbe…/1ce67194…/e1645da2…) **tidak berlaku lagi** dan tidak boleh dipakai untuk persetujuan.
+
+## Gate check ulang #58 — base `d082b134` diganti ke main terverifikasi
+
+- Base lama `d082b13493c80c55660bba8e0ce93a224fa424a1` masih ancestor, tetapi bukan base verifikasi terbaru.
+- Base verifikasi terbaru: `456eb1ad9732613fca56dca3b0c0c8dd8e18b652` (main setelah PR #69).
+- Head saat gate check: `ab0893075bebc0a072f16c9b165518f7ab867df7` (branch `docs/sdd-mv-agentic-runtime`).
+- Artefak change tidak berubah sejak revisi 5: G1/G2 dihitung ulang pada head ini dan hasilnya identik.
+- Kanal approval: komentar human-authored owner `sanusiharun` (id 39834005) di issue; `[CHATGPT]`/`[HERMES]` dan token bersama bukan approval.
+- Digest policy yang mengikat sesi ini: `sha256:50da828d3c961fc4aaa5f04344141d3281c669a2c5fcd4e1522ac95a63f2ef90` (declared; lihat `docs/reengineering/engineering/CONTROLLED_AUTONOMY_V1.md`).
+- G1/G2 tetap PENDING sampai approval manusia menyebut change id + digest + gate. Tidak ada implementasi runtime, worker dispatch, merge, atau deploy.
