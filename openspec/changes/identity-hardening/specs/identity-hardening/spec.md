@@ -28,8 +28,9 @@ mutation SHALL happen inside one transaction so that two concurrent requests can
 
 ### R2 — Pemisahan permission
 The service SHALL require `akses.kelola` (not `pengguna.ubah`) for endpoints that change a user's menu
-permissions, and SHALL reject `POST /admin/users` and `PATCH /admin/users/{id}` attempts that assign a
-role the actor is not entitled to grant.
+permissions, SHALL reject `POST /admin/users` and `PATCH /admin/users/{id}` attempts that assign a role
+the actor is not entitled to grant, and SHALL reject any permission-override change whose target is the
+actor's own account.
 
 #### Scenario: permission write without akses.kelola
 - GIVEN an actor with `pengguna.ubah` and without `akses.kelola`
@@ -39,13 +40,16 @@ role the actor is not entitled to grant.
 ### R3 — Refresh token sekali pakai dan rotasi atomik
 The service SHALL treat a refresh token as single-use. Consuming a token SHALL happen in one
 transaction that (a) marks the presented token consumed, and (b) issues exactly one replacement in the
-same token family. Presenting an already-consumed token SHALL be treated as replay, SHALL revoke the
-whole family, and SHALL be recorded as an audit event.
+same token family. Presenting an already-consumed token within a configured grace window (default 10
+seconds) after it was consumed SHALL be rejected with 401 without revoking the family; presenting it
+after that window SHALL be treated as replay, SHALL revoke the whole family, and SHALL be recorded as
+an audit event. Rotation SHALL NOT extend the family's expiry.
 
 #### Scenario: concurrent refresh
 - GIVEN one valid refresh token
 - WHEN two refresh requests arrive simultaneously
 - THEN exactly one returns 200 with a new token and the other returns 401
+- AND the family stays active, and the newly issued token can still be used
 
 #### Scenario: replay
 - GIVEN a refresh token already consumed
@@ -72,5 +76,12 @@ and SHALL NOT use the user identifier as the token.
 - THEN the request is rejected with 401
 
 ### R8 — Sesi legacy
-The service SHALL accept previously issued stateless refresh tokens until their original expiry, SHALL
-mark them in the log as `legacy_refresh`, and SHALL NOT force a mass logout on release.
+The service SHALL, until a configured cut-off date, accept a previously issued stateless refresh token
+once, exchange it for a new session family, reject it when the account is inactive, and record a
+`legacy_refresh` log entry without token material. After the cut-off it SHALL reject legacy tokens. No
+mass logout is forced on release.
+
+#### Scenario: legacy token upgraded once
+- GIVEN a refresh JWT issued before this change
+- WHEN it is presented before the cut-off
+- THEN a new session family is issued and the same JWT is rejected if presented again

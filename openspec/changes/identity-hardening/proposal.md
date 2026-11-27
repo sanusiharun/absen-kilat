@@ -37,7 +37,7 @@ Empat celah identitas/otorisasi terbukti ada di `main` (bukan dugaan). Rincian p
 | Semantik pencabutan | design §3.4 (revoke family, revoke all sesi) |
 | Migrasi dan sesi legacy | design §3.5 |
 | Invarian self-change role dan guard super admin terakhir | design §2, spec R1/R6 |
-| Jalur bypass pemberian permission | design §2.3 (enumerasi endpoint) |
+| Jalur bypass pemberian permission | design §2.3 (enumerasi endpoint, termasuk override untuk diri sendiri ⇒ 403) |
 | Trusted proxy dan multi-instance rate limit | design §4 |
 | Ketergantungan melingkar G2/T1 | tasks: rencana tes **sebelum** approval (dokumen), tes merah **sesudah** approval |
 
@@ -48,5 +48,5 @@ Empat celah identitas/otorisasi terbukti ada di `main` (bukan dugaan). Rincian p
 
 ## Definition of done
 
-Seluruh tes di `verification.md` (I1–I20) hijau, `go vet` bersih, CI hijau, perilaku super_admin
+Seluruh tes di `verification.md` (I1–I24) hijau, `go vet` bersih, CI hijau, perilaku super_admin
 tidak berubah selain aturan baru yang eksplisit.

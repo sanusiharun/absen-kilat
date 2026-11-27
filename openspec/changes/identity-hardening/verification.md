@@ -18,7 +18,7 @@ Base: `0413c9cc`. Rencana tes ini **boleh** ada sebelum approval (dokumen); ekse
 | I2 | HR mengubah role orang lain menjadi `super_admin` | 403 |
 | I3 | HR mengubah `employee` menjadi `supervisor` | 200 (bukan admin role, dan `rank(new) <= rank(actor)`) |
 | I4 | Super admin mengubah role siapa pun | 200 |
-| I5 | Menurunkan super admin terakhir | 422 |
+| I5 | Mutasi yang menyisakan 0 super_admin aktif, diuji di level service (lewat HTTP hanya bisa terjadi konkuren, I6) | 422 `last_super_admin`, baris `users` tidak berubah |
 | I6 | **Konkurensi**: dua request paralel menurunkan dua super admin terakhir | tepat satu 200, satu 422 |
 | I7 | Aktor dengan `pengguna.ubah` tanpa `akses.kelola` memanggil PATCH permissions | 403 |
 | I16 | `POST /admin/users` dengan `role=super_admin` oleh HR | 403 (jalur bypass tertutup) |
@@ -29,10 +29,15 @@ Base: `0413c9cc`. Rencana tes ini **boleh** ada sebelum approval (dokumen); ekse
 |---|---|---|
 | I8 | Refresh token akun yang dinonaktifkan | 401, keluarga token dicabut |
 | I9 | Refresh setelah password berubah | 401 (semua keluarga dicabut) |
-| I13 | **Dua refresh paralel dengan token sama** | tepat satu 200; yang kalah 401 |
+| I13 | **Dua refresh paralel dengan token sama** (dalam grace) | tepat satu 200; yang kalah 401; keluarga tetap hidup dan token baru bisa dipakai |
 | I14 | Replay token yang sudah dipakai | 401 dan **seluruh keluarga dicabut** |
 | I15 | Pemakaian token dari keluarga yang sudah dicabut | 401, tercatat audit `refresh_replay` |
-| I19 | Token legacy (JWT lama) masih diterima sampai `exp` | 200, log menandai `legacy_refresh` |
+| I19 | Token legacy (JWT lama) dipakai sebelum cut-off | 200 + family baru; pemakaian kedua token lama itu 401; log `legacy_refresh` tanpa token |
+| I19b | Token legacy untuk akun nonaktif | 401 |
+| I21 | Pemegang `akses.kelola` PATCH permissions miliknya sendiri | 403, tidak ada override tersimpan |
+| I22 | Mode penghitung bersama: dua proses, 5+5 percobaan | percobaan ke-11 ditolak secara agregat |
+| I23 | Batas grace: token dirotasi lalu dipakai ulang pada +9s dan +12s | +9s → 401 tanpa cabut keluarga; +12s → 401 + keluarga tercabut |
+| I24 | Audit route: setiap `/admin/*` punya pemetaan izin; tidak ada route penulis role/is_active/permission yang lolos | tes gagal bila ada route tanpa mapping |
 
 ## Matriks tes rate limit dan verifikasi
 
