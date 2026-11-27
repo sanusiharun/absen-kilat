@@ -49,9 +49,12 @@ Agent-authored comments SHALL NOT be accepted as approval.
 
 ### R3a — Approval channel is human-only
 The runtime SHALL NOT treat a GitHub comment author id as proof of human approval.
-The runtime SHALL accept approval only from a channel that agents cannot write to
-(out-of-band owner message with `APPROVE <change> <gate> <digest> <base_sha>`, or a signature
-verifiable with a key absent from the worker host).
+The runtime SHALL accept approval only from the **owner's private Telegram DM**, verified by
+`from.id` == configured owner chat id AND `chat.type == "private"`, carrying
+`APPROVE <change> <gate> <digest> <base_sha>`.
+The runtime SHALL reject forwarded messages, group/channel messages, bot/agent-originated
+messages, and any approval quoted from GitHub text.
+The runtime SHALL prevent replay by recording `message_id` and expiring an approval window.
 Until such a channel is configured, `dispatch` SHALL remain refused.
 
 #### Scenario: agent-authored relay is not approval

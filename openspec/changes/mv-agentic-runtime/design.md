@@ -134,17 +134,31 @@ kosong padahal terpakai". Nilai `unknown` tidak pernah ditulis sebagai 0.
 ## Approval identity — kanal human-only (revision 2)
 
 Masalah: komentar dari agen dan dari owner memakai akun GitHub yang sama, jadi `author_id`
-tidak membuktikan manusia. Usulan (pilih satu, keputusan owner):
+tidak membuktikan manusia. **Owner decision (D5, 2026-11-27): kanal = Telegram owner DM.**
 
-1. **Out-of-band token (disarankan).** Approval ditandatangani di kanal privat yang tidak bisa
-   ditulis agen: Telegram DM owner ke Hermes dengan format `APPROVE <change> <gate> <digest>
-   <base_sha>`. Runtime memverifikasi pesan itu berasal dari chat id owner (bukan GitHub), lalu
-   mengaitkannya ke komentar issue oleh manusia sebagai rujukan.
-2. **GPG/SSH signature** pada komentar (`git verify-commit` style) dari kunci owner yang tidak
-   ada di VPS.
-3. **Environment terpisah**: sesi penyetujuan di mesin owner, VPS hanya menerima record.
+Format pesan (kanal ini): `APPROVE <change> <gate> <digest> <base_sha>`.
 
-Sampai salah satu aktif, dispatch tetap disabled (fail closed).
+Verifikasi yang wajib diimplementasikan (bukan sekadar "chat-nya privat"):
+
+| Aspek | Aturan |
+|---|---|
+| Identitas pengirim | `message.from.id` == chat id owner yang dikonfigurasi (bukan username, bukan nama tampilan) |
+| Jenis chat | DM privat (`chat.type == "private"`), tolak grup/channel/forward |
+| Anti-replay | `message_id` + hash isi dicatat; pesan yang sama tidak bisa dipakai dua kali; window kedaluwarsa (mis. 30 menit) |
+| Binding | change id + gate + digest + base SHA harus cocok persis; digest dihitung ulang saat verifikasi |
+| Pemisahan dari agen | pesan yang berasal dari bot/agen (mis. dikirim via API dengan flag bot) ditolak; runtime hanya membaca DM manusia, dan **tidak pernah** menerima approval yang dikutip dari GitHub |
+| Pencabutan | owner bisa mengirim `REVOKE <change> <gate>`; record ditandai, bukan dihapus |
+| Audit | record approval menyimpan message_id, waktu, chat id (tanpa isi sensitif), digest, base SHA |
+
+Catatan penting: relay GitHub (prefix `[CHATGPT][…]`) **bukan** autentikasi manusia — dipakai
+hanya sebagai rujukan percakapan. Bila kanal DM belum terkonfigurasi, `dispatch` tetap ditolak.
+
+Sampai kanal DM terkonfigurasi dan diverifikasi, dispatch tetap disabled (fail closed).
+
+**Worst-case bound (belum diputuskan owner):** usulan konservatif — reservasi **penuh** 50.000
+token per run ketika telemetri `unavailable`, sehingga anggaran tidak pernah terlihat tersisa
+padahal sudah terpakai. Konsekuensinya: dengan budget 50k hanya ada **satu** run per change
+sampai telemetri tersedia; runtime harus melaporkan batas ini, bukan menyembunyikannya.
 
 ## Threat model
 
