@@ -68,12 +68,27 @@ The runtime SHALL enforce a wall-clock deadline per run and record the outcome.
 The runtime SHALL record unknown usage as unknown, never as zero.
 Default budget values SHALL be 50.000 tokens per change and 1800 s wall-clock, with at most two
 transient attempts. A hard wall-clock deadline SHALL be enforced regardless of token telemetry;
-when telemetry is `unavailable` the runtime SHALL charge a worst-case bound rather than zero.
+when telemetry is `unavailable` the runtime SHALL reserve the **full 50.000-token budget** for that
+run rather than zero, and SHALL record `reservation=50000` together with `telemetry=unavailable`.
+A run whose reservation consumes the whole budget SHALL leave zero remaining budget for the change;
+every subsequent dispatch for that change SHALL exit 21, start no worker, and SHALL NOT be retried
+automatically.
 
 #### Scenario: unset budget
 - GIVEN no budget for change `X`
 - WHEN dispatch runs
 - THEN it exits 21 and starts no worker
+
+#### Scenario: telemetry unavailable reserves the full budget
+- GIVEN a budget of 50.000 tokens for change `X`
+- WHEN a run finishes without token telemetry
+- THEN the run record contains `telemetry=unavailable` and `reservation=50000`
+- AND the remaining budget for `X` is 0
+
+#### Scenario: dispatch after reservation-exhausted budget
+- GIVEN the previous run for `X` reserved the full 50.000 tokens
+- WHEN dispatch runs again for `X`
+- THEN it exits 21, starts no worker, and records no automatic retry
 
 ### R5 — Worker termination and recovery
 The runtime SHALL start a worker in its own process group and record its PID.

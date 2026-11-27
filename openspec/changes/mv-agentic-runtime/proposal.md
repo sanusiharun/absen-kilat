@@ -53,8 +53,9 @@ that a single coordinator can run one worker per change with fail-closed behavio
   (SIGTERM→SIGKILL). Pemakaian token bergantung pada telemetri worker yang **tidak selalu
   tersedia**; runtime wajib membedakan `telemetry=reported` vs `telemetry=unavailable` dan
   tidak boleh memperlakukan "tidak diketahui" sebagai 0. Bila telemetri tidak tersedia,
-  runtime menagih batas atas yang disepakati (worst-case) atau menolak dispatch berikutnya —
-  pilihannya dicatat di design.
+  runtime **mereservasi penuh 50.000 token** (worst-case). Konsekuensinya sisa budget change itu
+  menjadi 0, sehingga dispatch berikutnya **ditolak (exit 21) tanpa retry otomatis** — fail closed,
+  bukan pilihan.
 - **D4 bootstrap:** satu eksekusi manual terkontrol untuk membangun `runtime/`, dengan lease +
   digest + base SHA dicatat di komentar issue. Setelah itu dispatch hanya lewat runtime.
 - **Approval identity:** identitas approval **tidak boleh** hanya mengandalkan author id,

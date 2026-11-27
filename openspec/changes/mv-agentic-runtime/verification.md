@@ -34,7 +34,8 @@ dan wajib dicatat ulang di issue; approval lama otomatis tidak valid.
 | N8 | Budget exhausted mid-run | run failed, further dispatch refused |
 | N9 | Worker ignores SIGTERM past grace | SIGKILL on process group, worktree quarantined |
 | N10 | Worker writes outside `allowed_paths` | run failed, evidence attached, no auto-retry |
-| N11 | Token telemetry unavailable | run records `telemetry=unavailable`, charges worst-case bound, next dispatch still evaluated |
+| N11 | Token telemetry unavailable | run records `telemetry=unavailable` **and** `reservation=50000`; remaining budget 0 |
+| N13 | Dispatch after reservation-exhausted budget | exits 21, no worker started, no automatic retry |
 | N12 | Approval relayed by an agent account (shared token) | rejected; requires human-only channel |
 
 ## Positive dry run (after G2)
