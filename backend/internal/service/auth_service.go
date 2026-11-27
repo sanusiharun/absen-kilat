@@ -15,6 +15,8 @@ import (
 
 	"github.com/sanusi/absen-kilat/backend/internal/domain"
 	pkgerrors "github.com/sanusi/absen-kilat/backend/pkg/errors"
+	"log/slog"
+	"strings"
 )
 
 // TokenPair carries the access and refresh tokens issued at login.
@@ -31,6 +33,17 @@ type AuthService struct {
 	accessTTL time.Duration
 	// refreshTTL bounds how long a refresh token remains valid.
 	refreshTTL time.Duration
+	// tokens adalah store rotasi refresh token. Bila nil, service berjalan dalam
+	// mode legacy (JWT stateless) — hanya dipakai tes lama; main selalu mengisi.
+	tokens domain.RefreshTokenRepository
+}
+
+// NewAuthServiceWithTokens membuat AuthService dengan store rotasi refresh token.
+// Dipakai produksi: refresh token menjadi sekali pakai dan bisa dicabut.
+func NewAuthServiceWithTokens(users domain.UserRepository, secret string, tokens domain.RefreshTokenRepository) *AuthService {
+	svc := NewAuthService(users, secret)
+	svc.tokens = tokens
+	return svc
 }
 
 // NewAuthService creates an AuthService.
@@ -90,15 +103,50 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*domai
 		return nil, nil, pkgerrors.Unauthorized("invalid email or password")
 	}
 
-	pair, err := s.issueTokens(user.ID)
+	pair, err := s.issueTokens(ctx, user.ID)
 	if err != nil {
 		return nil, nil, err
 	}
 	return user, pair, nil
 }
 
-// Refresh validates a refresh token and issues a new access token.
+// Refresh menukar refresh token dengan pasangan token baru.
+//
+// Token opaque (terbitan baru) WAJIB sekali pakai: satu transaksi menandai token
+// lama terpakai dan menerbitkan tepat satu pengganti. Pemakaian ulang dianggap
+// replay dan mencabut seluruh keluarga token (identity-hardening R3).
+//
+// Token JWT lama tetap diterima sampai kedaluwarsa (R8) lalu "di-upgrade" menjadi
+// token opaque, tanpa memaksa logout massal.
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenPair, error) {
+	if s.tokens == nil {
+		return s.refreshLegacyStateless(ctx, refreshToken)
+	}
+	if strings.Count(refreshToken, ".") == 2 {
+		return s.refreshLegacyUpgrade(ctx, refreshToken)
+	}
+
+	next, rawNext, err := s.newRefreshToken("", "", "")
+	if err != nil {
+		return nil, err
+	}
+	outcome, err := s.tokens.Rotate(ctx, hashToken(refreshToken), next)
+	if err != nil {
+		return nil, err
+	}
+	if outcome != domain.RotateOK {
+		return nil, pkgerrors.Unauthorized("invalid or expired refresh token")
+	}
+	access, err := s.signToken(tokenTypeAccess, next.UserID, time.Now().UTC(), s.accessTTL)
+	if err != nil {
+		return nil, err
+	}
+	return &TokenPair{AccessToken: access, RefreshToken: rawNext}, nil
+}
+
+// refreshLegacyStateless preserves the pre-rotation behaviour for services
+// constructed without a token store (tests and compatibility only).
+func (s *AuthService) refreshLegacyStateless(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	claims, err := s.parseToken(refreshToken, tokenTypeRefresh)
 	if err != nil {
 		return nil, pkgerrors.Unauthorized("invalid or expired refresh token")
@@ -110,7 +158,29 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 	if _, err := s.users.FindByID(ctx, userID); err != nil {
 		return nil, err
 	}
-	return s.issueTokens(userID)
+	return s.issueTokens(ctx, userID)
+}
+
+// refreshLegacyUpgrade menerima JWT refresh lama lalu menerbitkan token opaque
+// (upgrade bertahap, tanpa logout massal).
+func (s *AuthService) refreshLegacyUpgrade(ctx context.Context, refreshToken string) (*TokenPair, error) {
+	claims, err := s.parseToken(refreshToken, tokenTypeRefresh)
+	if err != nil {
+		return nil, pkgerrors.Unauthorized("invalid or expired refresh token")
+	}
+	userID, ok := claims["sub"].(string)
+	if !ok || userID == "" {
+		return nil, pkgerrors.Unauthorized("invalid refresh token")
+	}
+	user, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !user.IsActive {
+		return nil, pkgerrors.Unauthorized("invalid refresh token")
+	}
+	slog.Info("auth: legacy_refresh upgraded to rotating token", "user_id", userID)
+	return s.issueTokens(ctx, userID)
 }
 
 // ParseAccessToken validates an access token and returns the subject user id.
@@ -173,7 +243,16 @@ func (s *AuthService) ResetPassword(ctx context.Context, resetToken, newPassword
 		return fmt.Errorf("service.AuthService.ResetPassword: hash: %w", err)
 	}
 	user.PasswordHash = string(hash)
-	return s.users.Update(ctx, user)
+	if err := s.users.Update(ctx, user); err != nil {
+		return err
+	}
+	// Semua sesi lama gugur setelah password berubah (identity-hardening R3).
+	if s.tokens != nil {
+		if rerr := s.tokens.RevokeAllForUser(ctx, userID, "password_change"); rerr != nil {
+			slog.Warn("auth: gagal mencabut sesi setelah reset password", "user_id", userID, "error", rerr)
+		}
+	}
+	return nil
 }
 
 // ChangePassword updates the password for an authenticated user after
@@ -194,7 +273,15 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID, currentPasswor
 		return fmt.Errorf("service.AuthService.ChangePassword: hash: %w", err)
 	}
 	user.PasswordHash = string(hash)
-	return s.users.Update(ctx, user)
+	if err := s.users.Update(ctx, user); err != nil {
+		return err
+	}
+	if s.tokens != nil {
+		if rerr := s.tokens.RevokeAllForUser(ctx, userID, "password_change"); rerr != nil {
+			slog.Warn("auth: gagal mencabut sesi setelah ganti password", "user_id", userID, "error", rerr)
+		}
+	}
+	return nil
 }
 
 // --- internals ---
@@ -207,11 +294,25 @@ const (
 )
 
 // issueTokens mints a signed access + refresh token pair for the user.
-func (s *AuthService) issueTokens(userID string) (*TokenPair, error) {
+func (s *AuthService) issueTokens(ctx context.Context, userID string) (*TokenPair, error) {
 	now := time.Now().UTC()
 	access, err := s.signToken(tokenTypeAccess, userID, now, s.accessTTL)
 	if err != nil {
 		return nil, fmt.Errorf("service.AuthService.issueTokens: access: %w", err)
+	}
+	if s.tokens != nil {
+		row, raw, terr := s.newRefreshToken(userID, "", "")
+		if terr != nil {
+			return nil, terr
+		}
+		if cerr := s.tokens.Create(ctx, row); cerr != nil {
+			return nil, fmt.Errorf("service.AuthService.issueTokens: store refresh: %w", cerr)
+		}
+		access, aerr := s.signToken(tokenTypeAccess, userID, now, s.accessTTL)
+		if aerr != nil {
+			return nil, fmt.Errorf("service.AuthService.issueTokens: access: %w", aerr)
+		}
+		return &TokenPair{AccessToken: access, RefreshToken: raw}, nil
 	}
 	refresh, err := s.signToken(tokenTypeRefresh, userID, now, s.refreshTTL)
 	if err != nil {
