@@ -17,6 +17,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state (pola sama dengan PR #22).
     if (params.get("expired") === "1") setNotice("Sesi Anda berakhir. Silakan masuk kembali.");
     else if (params.get("required") === "1") setNotice("Silakan masuk untuk melanjutkan.");
     const next = params.get("next");

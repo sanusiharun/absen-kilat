@@ -84,6 +84,7 @@ export default function MenuAccessModal({
   }, [userId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state (pola sama dengan PR #22).
     load();
   }, [load]);
 
