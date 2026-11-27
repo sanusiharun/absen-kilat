@@ -39,20 +39,33 @@ SQLite: `BEGIN IMMEDIATE` mencegah dua penurunan bersamaan sama-sama lolos. Kolo
 Untuk Postgres nanti: `SELECT ... FOR UPDATE` pada baris target + advisory lock per tabel `users`. Tes konkurensi: dua request paralel menurunkan dua super admin terakhir ⇒ tepat satu
 berhasil (I6).
 
+Invarian ini **tidak boleh bergantung pada jalur tulis**: role dan `is_active` adalah dua field berbeda di
+endpoint yang sama (`PATCH /admin/users/{id}`), jadi satu-satunya cara aman adalah menghitung ulang di dalam
+transaksi untuk **setiap** mutasi yang menghilangkan `super_admin` aktif — termasuk saat `role` dan
+`is_active` dikirim bersamaan dalam satu body. Tidak ada endpoint `DELETE /admin/users`; penonaktifan selalu
+lewat `PATCH`. Tes silang-jalur **I6b**: dua request paralel, satu menurunkan role super admin A, satu
+menonaktifkan super admin B ⇒ tepat satu berhasil. Tes service-level **I5** menutup kasus
+`role`+`is_active` dalam satu body.
+
 ### 2.3 Jalur bypass yang harus ditutup
 
-Semua endpoint yang bisa mengubah role atau permission wajib melewati guard yang sama:
+Tabel ini **wajib identik dengan route table nyata** (`backend/internal/authz/routes.go` @ `0413c9cc`):
+tidak ada endpoint spekulatif, tidak ada endpoint penulis yang terlewat. Saat ini hanya tiga endpoint yang
+bisa mengubah role atau permission; tidak ada `DELETE /admin/users` dan tidak ada
+`/admin/access/templates/*`.
 
-| Endpoint | Penjaga baru |
-|---|---|
-| `POST /admin/users` (dengan `role`) | guard §2.1 |
-| `PATCH /admin/users/{id}` (dengan `role`) | guard §2.1 |
-| `PATCH /admin/users/{id}/permissions` | `akses.kelola` (bukan `pengguna.ubah`) |
-| `PATCH /admin/users/{id}/permissions` dengan `id` = aktor | **403** — tanpa ini pemegang `kelola` bisa memberi dirinya `pengguna.ubah` lalu naik role |
-| `PATCH /admin/access/templates/*` (bila ada) | `super_admin` saja |
-| seed/migrasi | hanya lewat kode, bukan API |
+| Endpoint | Penjaga baru | Tes |
+|---|---|---|
+| `POST /admin/users` (body memuat `role`) | guard §2.1 | I16 |
+| `PATCH /admin/users/{id}` (body memuat `role`) | guard §2.1 | I2 |
+| `PATCH /admin/users/{id}` (body memuat `is_active=false`) | guard §2.2 (silang-jalur) | I6b |
+| `PATCH /admin/users/{id}/permissions` | `akses.kelola` (bukan `pengguna.ubah`) | I7, I25 |
+| `PATCH /admin/users/{id}/permissions` dengan `id` = aktor | **403** — tanpa ini pemegang `kelola` bisa memberi dirinya `pengguna.ubah` lalu naik role | I21 |
+| seed/migrasi | hanya lewat kode, bukan API | I24 (audit route) |
 
-Setiap endpoint di tabel ini mendapat tes 403 eksplisit (I2, I7, I16, I21).
+Setiap baris punya tes 403 eksplisit sendiri; satu tes tidak boleh dipakai untuk membuktikan dua jalur.
+I25 = view-only actor (`pengguna.ubah` tanpa `akses.kelola`) membaca `GET /admin/users/{id}/permissions`
+tetap 200 (memastikan guard permission-write tidak ikut memblokir read).
 
 ## 3. Refresh token: rotasi sekali pakai, atomik
 
@@ -139,12 +152,44 @@ COMMIT;
 
 - Migrasi hanya membuat tabel baru; tabel `users` tidak disentuh.
 - Token JWT lama (tanpa baris sesi) diterima sementara lewat jalur terpisah yang: memverifikasi
-  signature + `type=refresh`, memuat user, **menolak bila `is_active = 0`**, lalu menukarnya **satu kali**
-  menjadi family baru (upgrade-on-first-refresh) dengan pencatatan `legacy_refresh`. Tidak ada
-  paksa-logout massal saat rilis, dan tidak ada jalur legacy yang bisa dipakai berulang.
+  signature + `type=refresh` + `exp`, memuat user, **menolak bila `is_active = 0`**, lalu menukarnya
+  **satu kali** menjadi family baru (upgrade-on-first-refresh) dengan pencatatan `legacy_refresh`.
+- **Mekanisme "satu kali" (bukan sekadar niat).** JWT legacy bersifat stateless, jadi pemakaian ulang hanya
+  bisa dicegah dengan state. Migrasi `012` menambah tabel ketiga:
+
+  ```
+  legacy_refresh_consumed(
+    token_hash TEXT PRIMARY KEY,      -- sha256(JWT utuh), token mentah tidak disimpan
+    user_id    TEXT NOT NULL REFERENCES users(id),
+    family_id  TEXT NOT NULL,         -- family hasil penukaran
+    consumed_at TEXT NOT NULL
+  )
+  ```
+
+  Urutan wajib, semuanya dalam satu `BEGIN IMMEDIATE`:
+
+  ```
+  BEGIN IMMEDIATE;
+    verifikasi signature, type=refresh, exp > now         -- gagal -> 401, tidak ada tulis
+    if now > LEGACY_REFRESH_ACCEPT_UNTIL                  -> 401 legacy_expired
+    INSERT INTO legacy_refresh_consumed(...)              -- PK conflict = sudah pernah dipakai
+      -- conflict -> revoke family_id yang tercatat di baris lama,
+      --             audit `legacy_refresh_replay`, 401 invalid_grant
+    user := SELECT ... ; if is_active = 0                 -> ROLLBACK, 401
+    buat family + token pertama
+  COMMIT;
+  ```
+
+  `PRIMARY KEY` + `BEGIN IMMEDIATE` adalah yang menentukan pemenang, bukan `SELECT` lebih dulu: dua
+  permintaan paralel dengan JWT yang sama hanya bisa menghasilkan satu insert, jadi hanya satu family.
+- **Tanpa grace.** Berbeda dari R3, jalur legacy **tidak** punya jendela `REFRESH_REUSE_GRACE`. Tabrakan
+  double-refresh klien di jalur legacy berarti 401 + family dicabut + login ulang sekali; itu konsekuensi
+  yang diterima dan dibatasi oleh single-flight klien (T9) serta oleh umur jendela migrasi yang pendek.
+  Memberi grace di sini akan membuat JWT legacy bisa dipakai berulang — persis yang dilarang.
 - Jendela penerimaan dibatasi `LEGACY_REFRESH_ACCEPT_UNTIL` (default: 7 hari setelah deploy, diisi saat
-  rilis). Setelah itu jalur legacy mati; token sisa ditolak dan pengguna login ulang.
-- Bila metrik `legacy_refresh` sudah nol, jalur legacy dihapus pada rilis berikutnya.
+  rilis). Setelah itu jalur legacy mati; token sisa ditolak dan pengguna login ulang. Baris
+  `legacy_refresh_consumed` dipangkas 7 hari setelah cut-off (tidak ada lagi penukaran yang mungkin).
+- Bila metrik `legacy_refresh` sudah nol, jalur legacy + tabel penandanya dihapus pada rilis berikutnya.
 - Rollback: hentikan penerbitan token baru, biarkan tabel ada (tidak merusak data).
 
 ## 4. Rate limit auth

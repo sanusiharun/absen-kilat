@@ -4,22 +4,41 @@ Base: `0413c9cc`. Rencana tes ini **boleh** ada sebelum approval (dokumen); ekse
 
 ## Gate evidence
 
-| Gate | Kebutuhan |
-|---|---|
-| G1 | proposal + design disetujui owner (digest + base SHA final) |
-| G2 | tasks + spec + **rencana tes ini** disetujui; tes merah ditulis setelah G2 |
-| G3 | perintah, exit code, hasil tes, run CI, diff scope vs `allowed_paths` |
+Definisi gate di bawah ini **harus identik dengan** `tools/validate_sdd.py` (revisi 3 sebelumnya salah:
+design dicantumkan di G1 padahal tidak ikut di-hash, dan `verification.md` dicantumkan di G2 padahal tidak
+pernah di-hash). Kanonik, apa adanya di kode:
+
+| Gate | Artefak yang di-hash (urut) | Lainnya |
+|---|---|---|
+| G1 | `proposal.md` | design, tasks, spec, rencana tes **tidak** di-hash |
+| G2 | `proposal.md`, `design.md`, `tasks.md`, `specs/*/spec.md` (urut path) | `verification.md` **tidak** di-hash |
+| G3 | — | perintah, exit code, hasil tes, run CI, diff scope vs `allowed_paths` |
+
+Framing digest (sama untuk G1/G2): `sha256` atas, untuk setiap berkas berurutan, `len(path) ‖ path` lalu
+`len(content) ‖ content`, dengan panjang sebagai big-endian 8 byte dan `path` relatif terhadap direktori
+change (posix). Perintah: `python3 tools/validate_sdd.py --digest identity-hardening G1|G2`.
+
+**Celah yang diakui:** karena `verification.md` tidak di-hash, rencana tes bisa dilemahkan setelah G2 tanpa
+mengubah digest. Mitigasi yang dipakai sekarang (tanpa mengubah tool, sehingga digest change lain tidak
+bergeser): setiap laporan gate **wajib mencantumkan `PLAN_SHA256`** = `sha256(verification.md)`, sehingga
+versi rencana tes yang disetujui bisa dibuktikan byte-identik. Opsi yang lebih kuat — memasukkan
+`verification.md` ke G2 di validator — menggeser digest semua change yang sedang berjalan dan karena itu
+butuh persetujuan owner terpisah; belum dilakukan.
+
+Yang dilaporkan di setiap gerbang: `base_sha` (commit yang di-review), `head_sha`, digest G1/G2 penuh,
+`PLAN_SHA256`, keluaran `validate_sdd.py` (termasuk `STRUCTURE PASS`), dan `pytest tools/tests`.
 
 ## Matriks tes negatif (role dan permission)
 
 | ID | Skenario | Harapan |
 |---|---|---|
 | I1 | HR mengubah role dirinya menjadi `super_admin` | 403, role tidak berubah |
-| I2 | HR mengubah role orang lain menjadi `super_admin` | 403 |
+| I2 | HR mengubah role orang lain menjadi `super_admin` lewat `PATCH /admin/users/{id}` | 403, role tidak berubah |
 | I3 | HR mengubah `employee` menjadi `supervisor` | 200 (bukan admin role, dan `rank(new) <= rank(actor)`) |
 | I4 | Super admin mengubah role siapa pun | 200 |
 | I5 | Mutasi yang menyisakan 0 super_admin aktif, diuji di level service (lewat HTTP hanya bisa terjadi konkuren, I6) | 422 `last_super_admin`, baris `users` tidak berubah |
-| I6 | **Konkurensi**: dua request paralel menurunkan dua super admin terakhir | tepat satu 200, satu 422 |
+| I6 | **Konkurensi**: dua request paralel menurunkan dua super admin terakhir (dua-duanya lewat jalur role) | tepat satu 200, satu 422 |
+| I6b | **Konkurensi silang-jalur**: paralel, satu `PATCH` menurunkan role super admin A, satu `PATCH` menonaktifkan super admin B | tepat satu berhasil; tidak pernah 0 `super_admin` aktif |
 | I7 | Aktor dengan `pengguna.ubah` tanpa `akses.kelola` memanggil PATCH permissions | 403 |
 | I16 | `POST /admin/users` dengan `role=super_admin` oleh HR | 403 (jalur bypass tertutup) |
 
@@ -33,8 +52,11 @@ Base: `0413c9cc`. Rencana tes ini **boleh** ada sebelum approval (dokumen); ekse
 | I14 | Replay token yang sudah dipakai | 401 dan **seluruh keluarga dicabut** |
 | I15 | Pemakaian token dari keluarga yang sudah dicabut | 401, tercatat audit `refresh_replay` |
 | I19 | Token legacy (JWT lama) dipakai sebelum cut-off | 200 + family baru; pemakaian kedua token lama itu 401; log `legacy_refresh` tanpa token |
-| I19b | Token legacy untuk akun nonaktif | 401 |
+| I19b | Token legacy untuk akun nonaktif | 401, tidak ada family dibuat |
+| I19c | **Dua request paralel dengan satu JWT legacy** | tepat satu 200; yang kalah 401; family hasil pemenang dicabut + audit `legacy_refresh_replay` |
+| I19d | Pemakaian kedua JWT legacy berurutan (bukan paralel) | 401, family pertama dicabut, audit `legacy_refresh_replay` |
 | I21 | Pemegang `akses.kelola` PATCH permissions miliknya sendiri | 403, tidak ada override tersimpan |
+| I25 | Aktor `pengguna.ubah` tanpa `akses.kelola` membaca `GET /admin/users/{id}/permissions` | 200 (guard tulis tidak ikut memblokir baca) |
 | I22 | Mode penghitung bersama: dua proses, 5+5 percobaan | percobaan ke-11 ditolak secara agregat |
 | I23 | Batas grace: token dirotasi lalu dipakai ulang pada +9s dan +12s | +9s → 401 tanpa cabut keluarga; +12s → 401 + keluarga tercabut |
 | I24 | Audit route: setiap `/admin/*` punya pemetaan izin; tidak ada route penulis role/is_active/permission yang lolos | tes gagal bila ada route tanpa mapping |

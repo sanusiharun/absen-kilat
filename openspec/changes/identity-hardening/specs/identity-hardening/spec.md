@@ -76,12 +76,29 @@ and SHALL NOT use the user identifier as the token.
 - THEN the request is rejected with 401
 
 ### R8 — Sesi legacy
+
 The service SHALL, until a configured cut-off date, accept a previously issued stateless refresh token
-once, exchange it for a new session family, reject it when the account is inactive, and record a
-`legacy_refresh` log entry without token material. After the cut-off it SHALL reject legacy tokens. No
-mass logout is forced on release.
+at most once, exchange it for a new session family, reject it when the account is inactive, and record a
+`legacy_refresh` audit event without token material. "At most once" SHALL be enforced by state, not by
+the token itself: the first exchange SHALL insert a marker row keyed by the SHA-256 of the presented JWT,
+and that insert SHALL share one transaction with the family creation so that a concurrent second
+presentation cannot also succeed. A second presentation of the same JWT SHALL be rejected with 401,
+SHALL revoke the family created by the first exchange, and SHALL be recorded as `legacy_refresh_replay`.
+The legacy path SHALL NOT have a reuse grace window: unlike R3, reuse is never treated as a benign client
+collision. After the cut-off the service SHALL reject legacy tokens. No mass logout is forced on release.
 
 #### Scenario: legacy token upgraded once
 - GIVEN a refresh JWT issued before this change
 - WHEN it is presented before the cut-off
 - THEN a new session family is issued and the same JWT is rejected if presented again
+
+#### Scenario: concurrent presentation of one legacy JWT
+- GIVEN one legacy refresh JWT
+- WHEN two refresh requests present it simultaneously
+- THEN exactly one returns 200 with a new family and the other returns 401
+- AND the family created by the winning request is revoked, recorded as `legacy_refresh_replay`
+
+#### Scenario: legacy token for an inactive account
+- GIVEN a legacy refresh JWT whose account has `is_active = 0`
+- WHEN it is presented before the cut-off
+- THEN the request is rejected with 401 and no session family is created
