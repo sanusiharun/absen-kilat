@@ -78,3 +78,18 @@ situ — bukan menebak atau memintas batas.
 | 2026-11-27 | Rekonsiliasi fondasi SDD non-destruktif (branch baru bila perlu); review PR #55 tetap read-only | #57 `7225576818` |
 | 2026-11-27 | Koreksi doc-only reservasi penuh 50.000, cleanup `.pyc`, digest ulang | #58 `7225575998` |
 | 2026-11-27 | Lanjut planning produk + spec/dokumen low-risk; pilot dashboard + slice end-to-end terkecil | #59 `7225577504` |
+
+## 7. Kanal approval owner (mengikat, 2026-11-27)
+
+- **Telegram DM owner terautentikasi adalah satu-satunya kanal approval.** Komentar, reaction, label,
+  atau prefix di GitHub bukan approval; GitHub hanya koordinasi, penugasan, review, dan audit trail.
+- Permintaan approval dikirim sebagai **tombol pilihan** yang memuat **rekomendasi, risiko, evidence,
+  dan dampak** setiap opsi.
+- Approval terikat pada **scope + revision + commit SHA + digest**. Tanpa binding itu, approval tidak
+  boleh dieksekusi.
+- Aktivitas yang sudah diizinkan di §1 **tidak perlu** approval berulang.
+- Approval yang tidak urgent **digabung** dalam satu permintaan.
+- **Quality gate mendahului tawaran merge**: CI wajib hijau, security review selesai, acceptance test
+  PASS. Approval owner tidak boleh mem-bypass gate kualitas.
+- Bila approval belum dijawab, **lanjutkan pekerjaan independen** yang tidak terblokir; delivery tidak
+  boleh berhenti total karena satu approval pending.
