@@ -81,6 +81,7 @@ export default function LemburPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
     void load(tab);
   }, [tab, load]);
 

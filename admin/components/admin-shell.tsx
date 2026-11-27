@@ -6,7 +6,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { api, clearToken, getToken, mediaURL } from "@/lib/api";
+import { api, clearToken, getToken } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { Icon, type IconName } from "@/components/icons";
 import { Avatar } from "@/components/ui";
@@ -84,12 +84,10 @@ export default function AdminShell({
   const { theme, toggle } = useTheme();
   const [me, setMe] = useState<Me | null>(null);
   const [role, setRole] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
   const loadMe = useCallback(async () => {
     if (!getToken()) {
       router.replace("/login");
-      setLoading(false);
       return;
     }
     try {
@@ -103,16 +101,15 @@ export default function AdminShell({
       if (err instanceof Error && /401|403/.test(err.message)) {
         clearToken();
         router.replace("/login");
-        setLoading(false);
-        return;
+          return;
       }
       setMe(null);
     } finally {
-      setLoading(false);
     }
   }, [router]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pemuatan data disengaja: effect memanggil loader yang menyalakan state loading.
     loadMe();
   }, [loadMe]);
 
