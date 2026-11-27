@@ -1,0 +1,2 @@
+# Cost and retry policy
+Default proposal: one active coding worker, one independent review, at most two transient retries with exponential backoff; no retries for auth, policy or deterministic test failures. Poll every 5 minutes when active and 30 minutes idle, configurable after onboarding. No model calls for unchanged events. Record model, elapsed time, token usage if available, and retry count; unknown usage is not zero. Stop at configured budget or missing budget for paid autonomous execution. Human sets actual monetary/token limits before enabling dispatch.

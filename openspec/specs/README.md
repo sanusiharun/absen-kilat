@@ -1,0 +1,2 @@
+# Canonical specifications
+Populate capability specs only after feature discovery and human approval. Draft baselines live separately in docs/reengineering/features. Archive approved changes into canonical specs after verified delivery.

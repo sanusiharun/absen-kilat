@@ -1,0 +1,2 @@
+# Dashboard redesign
+Status: PROPOSED; G1/G2 pending. Modern enterprise admin experience. Scope: shell, navigation, KPI, trend, action center, recent attendance, responsive and dark mode. Non-goals: backend behavior, schema, mobile redesign. Dependencies: confirm API semantics, role scope and availability of activity/approval data. Missing APIs require separate approved change; no fabricated values.
