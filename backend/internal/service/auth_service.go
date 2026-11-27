@@ -33,10 +33,16 @@ type AuthService struct {
 	accessTTL time.Duration
 	// refreshTTL bounds how long a refresh token remains valid.
 	refreshTTL time.Duration
+	// legacyDeadline membatasi sampai kapan token JWT lama masih diterima
+	// (release + 7 hari). Setelah itu token legacy ditolak.
+	legacyDeadline time.Time
 	// tokens adalah store rotasi refresh token. Bila nil, service berjalan dalam
 	// mode legacy (JWT stateless) — hanya dipakai tes lama; main selalu mengisi.
 	tokens domain.RefreshTokenRepository
 }
+
+// SetLegacyRefreshCutoff menetapkan batas waktu penerimaan token legacy.
+func (s *AuthService) SetLegacyRefreshCutoff(t time.Time) { s.legacyDeadline = t }
 
 // NewAuthServiceWithTokens membuat AuthService dengan store rotasi refresh token.
 // Dipakai produksi: refresh token menjadi sekali pakai dan bisa dicabut.
@@ -49,10 +55,11 @@ func NewAuthServiceWithTokens(users domain.UserRepository, secret string, tokens
 // NewAuthService creates an AuthService.
 func NewAuthService(users domain.UserRepository, secret string) *AuthService {
 	return &AuthService{
-		users:      users,
-		secret:     []byte(secret),
-		accessTTL:  15 * time.Minute,
-		refreshTTL: 30 * 24 * time.Hour,
+		users:          users,
+		secret:         []byte(secret),
+		accessTTL:      15 * time.Minute,
+		refreshTTL:     30 * 24 * time.Hour,
+		legacyDeadline: time.Now().Add(7 * 24 * time.Hour),
 	}
 }
 
@@ -164,6 +171,11 @@ func (s *AuthService) refreshLegacyStateless(ctx context.Context, refreshToken s
 // refreshLegacyUpgrade menerima JWT refresh lama lalu menerbitkan token opaque
 // (upgrade bertahap, tanpa logout massal).
 func (s *AuthService) refreshLegacyUpgrade(ctx context.Context, refreshToken string) (*TokenPair, error) {
+	if !s.legacyDeadline.IsZero() && time.Now().UTC().After(s.legacyDeadline) {
+		// Cutoff release+7d: token legacy tidak lagi diterima.
+		slog.Info("auth: legacy_refresh ditolak karena melewati cutoff", "cutoff", s.legacyDeadline.Format(time.RFC3339))
+		return nil, pkgerrors.Unauthorized("invalid or expired refresh token")
+	}
 	claims, err := s.parseToken(refreshToken, tokenTypeRefresh)
 	if err != nil {
 		return nil, pkgerrors.Unauthorized("invalid or expired refresh token")
@@ -179,8 +191,26 @@ func (s *AuthService) refreshLegacyUpgrade(ctx context.Context, refreshToken str
 	if !user.IsActive {
 		return nil, pkgerrors.Unauthorized("invalid refresh token")
 	}
+
+	// Upgrade atomik: token legacy ditandai terpakai dan penggantinya diterbitkan
+	// dalam satu transaksi, sehingga pemakaian ulang terdeteksi sebagai replay.
+	next, rawNext, nerr := s.newRefreshToken(userID, "", "")
+	if nerr != nil {
+		return nil, nerr
+	}
+	outcome, cerr := s.tokens.ConsumeLegacy(ctx, hashToken(refreshToken), next)
+	if cerr != nil {
+		return nil, cerr
+	}
+	if outcome != domain.RotateOK {
+		return nil, pkgerrors.Unauthorized("invalid or expired refresh token")
+	}
+	access, aerr := s.signToken(tokenTypeAccess, userID, time.Now().UTC(), s.accessTTL)
+	if aerr != nil {
+		return nil, fmt.Errorf("service.AuthService.refreshLegacyUpgrade: access: %w", aerr)
+	}
 	slog.Info("auth: legacy_refresh upgraded to rotating token", "user_id", userID)
-	return s.issueTokens(ctx, userID)
+	return &TokenPair{AccessToken: access, RefreshToken: rawNext}, nil
 }
 
 // ParseAccessToken validates an access token and returns the subject user id.
@@ -242,17 +272,15 @@ func (s *AuthService) ResetPassword(ctx context.Context, resetToken, newPassword
 	if err != nil {
 		return fmt.Errorf("service.AuthService.ResetPassword: hash: %w", err)
 	}
-	user.PasswordHash = string(hash)
-	if err := s.users.Update(ctx, user); err != nil {
-		return err
-	}
-	// Semua sesi lama gugur setelah password berubah (identity-hardening R3).
+	// Fail closed: sesi dicabut lebih dulu. Bila pencabutan gagal, password TIDAK
+	// diubah (arah aman: sesi lama tetap tercabut, password tetap lama).
 	if s.tokens != nil {
 		if rerr := s.tokens.RevokeAllForUser(ctx, userID, "password_change"); rerr != nil {
-			slog.Warn("auth: gagal mencabut sesi setelah reset password", "user_id", userID, "error", rerr)
+			return fmt.Errorf("service.AuthService.ResetPassword: revoke sessions: %w", rerr)
 		}
 	}
-	return nil
+	user.PasswordHash = string(hash)
+	return s.users.Update(ctx, user)
 }
 
 // ChangePassword updates the password for an authenticated user after
@@ -272,16 +300,13 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID, currentPasswor
 	if err != nil {
 		return fmt.Errorf("service.AuthService.ChangePassword: hash: %w", err)
 	}
-	user.PasswordHash = string(hash)
-	if err := s.users.Update(ctx, user); err != nil {
-		return err
-	}
 	if s.tokens != nil {
 		if rerr := s.tokens.RevokeAllForUser(ctx, userID, "password_change"); rerr != nil {
-			slog.Warn("auth: gagal mencabut sesi setelah ganti password", "user_id", userID, "error", rerr)
+			return fmt.Errorf("service.AuthService.ChangePassword: revoke sessions: %w", rerr)
 		}
 	}
-	return nil
+	user.PasswordHash = string(hash)
+	return s.users.Update(ctx, user)
 }
 
 // --- internals ---

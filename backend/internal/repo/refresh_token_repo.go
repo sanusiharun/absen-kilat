@@ -77,7 +77,15 @@ func (r *RefreshTokenRepository) Rotate(ctx context.Context, tokenHash string, n
 		}
 		return domain.RotateRevoked, nil
 	}
-	if exp, perr := time.Parse(time.RFC3339, expiresAt); perr == nil && now.After(exp) {
+	exp, perr := time.Parse(time.RFC3339, expiresAt)
+	if perr != nil {
+		// Fail closed: expiry tidak terbaca berarti token tidak boleh dipakai.
+		if err := tx.Commit(); err != nil {
+			return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: commit malformed: %w", err)
+		}
+		return domain.RotateExpired, nil
+	}
+	if now.After(exp) {
 		if err := tx.Commit(); err != nil {
 			return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: commit expired: %w", err)
 		}
@@ -151,4 +159,51 @@ func revokeFamilyTx(ctx context.Context, e execer, familyID, reason string, now 
 		return fmt.Errorf("refresh.revokeFamily: %w", err)
 	}
 	return nil
+}
+
+// ConsumeLegacy menandai token legacy (JWT stateless) sebagai terpakai secara
+// atomik dan menerbitkan pengganti pada keluarga baru. Pemakaian ulang token
+// legacy yang sama terdeteksi sebagai replay dan mencabut keluarganya.
+func (r *RefreshTokenRepository) ConsumeLegacy(ctx context.Context, tokenHash string, next *domain.RefreshToken) (domain.RotateOutcome, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var existingID, familyID string
+	err = tx.QueryRowContext(ctx, `SELECT id, family_id FROM refresh_tokens WHERE token_hash = ?`, tokenHash).
+		Scan(&existingID, &familyID)
+	switch {
+	case err == nil:
+		// Sudah pernah di-upgrade: replay.
+		if err := revokeFamilyTx(ctx, tx, familyID, "replay", time.Now().UTC()); err != nil {
+			return domain.RotateNotFound, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: commit replay: %w", err)
+		}
+		return domain.RotateReplay, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: select: %w", err)
+	}
+
+	now := time.Now().UTC()
+	// Baris penanda untuk token legacy: langsung consumed, menunjuk penggantinya.
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, consumed_at, replaced_by, ip, user_agent)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 'legacy')`,
+		"legacy-"+next.ID, next.UserID, next.FamilyID, tokenHash, fmtTime(now), fmtTime(next.ExpiresAt), fmtTime(now), next.ID); err != nil {
+		return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: insert marker: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, ip, user_agent)
+		 VALUES (?, ?, ?, ?, ?, ?, '', 'legacy_upgrade')`,
+		next.ID, next.UserID, next.FamilyID, next.TokenHash, fmtTime(next.IssuedAt), fmtTime(next.ExpiresAt)); err != nil {
+		return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: insert next: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: commit: %w", err)
+	}
+	return domain.RotateOK, nil
 }

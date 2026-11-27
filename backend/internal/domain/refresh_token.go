@@ -43,6 +43,9 @@ type RefreshTokenRepository interface {
 	// Rotate atomically consumes tokenHash and inserts next into the same family.
 	// It reports replay/revocation/expiry explicitly and never succeeds silently.
 	Rotate(ctx context.Context, tokenHash string, next *RefreshToken) (RotateOutcome, error)
+	// ConsumeLegacy marks a stateless legacy (JWT) refresh token as consumed and
+	// issues exactly one replacement, atomically. Reuse is reported as replay.
+	ConsumeLegacy(ctx context.Context, tokenHash string, next *RefreshToken) (RotateOutcome, error)
 	// RevokeFamily revokes every token of one login family.
 	RevokeFamily(ctx context.Context, familyID, reason string) error
 	// RevokeAllForUser revokes every family of a user (password/role change).

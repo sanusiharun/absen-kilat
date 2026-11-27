@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -9,7 +10,9 @@ import (
 	"time"
 
 	"github.com/sanusi/absen-kilat/backend/internal/db"
+	"github.com/sanusi/absen-kilat/backend/internal/domain"
 	"github.com/sanusi/absen-kilat/backend/internal/repo"
+	pkgerrors "github.com/sanusi/absen-kilat/backend/pkg/errors"
 )
 
 // Tes invarian rotasi refresh token (identity-hardening R3/R8, I8/I9/I13/I14/I19).
@@ -68,9 +71,12 @@ func TestRotation_ConcurrentRefreshSingleWinner(t *testing.T) {
 			defer mu.Unlock()
 			if err == nil {
 				success++
-			} else {
-				failed++
+				return
 			}
+			if !pkgerrors.IsUnauthorized(err) {
+				t.Errorf("yang kalah harus 401 unauthorized, dapat: %v", err)
+			}
+			failed++
 		}()
 	}
 	wg.Wait()
@@ -191,5 +197,191 @@ func TestRotation_TokenChangesOnRefresh(t *testing.T) {
 	}
 	if next.AccessToken == "" {
 		t.Fatal("access token baru harus ada")
+	}
+}
+
+// Fake store untuk menyuntikkan kegagalan pencabutan (fail-closed password).
+type failingRevokeStore struct{ domain.RefreshTokenRepository }
+
+func (f *failingRevokeStore) Create(context.Context, *domain.RefreshToken) error { return nil }
+
+func (f *failingRevokeStore) Rotate(context.Context, string, *domain.RefreshToken) (domain.RotateOutcome, error) {
+	return domain.RotateNotFound, nil
+}
+
+func (f *failingRevokeStore) ConsumeLegacy(context.Context, string, *domain.RefreshToken) (domain.RotateOutcome, error) {
+	return domain.RotateNotFound, nil
+}
+
+func (f *failingRevokeStore) RevokeFamily(context.Context, string, string) error { return nil }
+
+func (f *failingRevokeStore) RevokeAllForUser(context.Context, string, string) error {
+	return errors.New("storage unavailable")
+}
+
+// Password TIDAK boleh berubah bila pencabutan sesi gagal (fail closed).
+func TestRotation_PasswordChangeFailsClosedWhenRevokeFails(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "f.css.db")
+	pool, err := db.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	users := repo.NewUserRepository(pool)
+	svc := NewAuthServiceWithTokens(users, "secret", &failingRevokeStore{})
+
+	if _, err := svc.Register(ctx, "failclosed@test.dev", "rahasia-panjang-123", "U"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	u, err := users.FindByEmail(ctx, "failclosed@test.dev")
+	if err != nil {
+		t.Fatalf("FindByEmail: %v", err)
+	}
+	before := u.PasswordHash
+
+	if err := svc.ChangePassword(ctx, u.ID, "rahasia-panjang-123", "rahasia-baru-456"); err == nil {
+		t.Fatal("ganti password harus gagal bila pencabutan sesi gagal")
+	}
+	after, err := users.FindByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if after.PasswordHash != before {
+		t.Fatal("password tidak boleh berubah saat pencabutan sesi gagal")
+	}
+}
+
+// Penguncian transaksi harus terbukti lintas koneksi: dua pool terpisah pada file
+// DB yang sama, satu token, dua request paralel -> tepat satu menang.
+func TestRotation_LockingAcrossConnections(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "two.db")
+
+	poolA, err := db.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("db.Open A: %v", err)
+	}
+	t.Cleanup(func() { poolA.Close() })
+	poolB, err := db.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("db.Open B: %v", err)
+	}
+	t.Cleanup(func() { poolB.Close() })
+
+	svcA := NewAuthServiceWithTokens(repo.NewUserRepository(poolA), "secret", repo.NewRefreshTokenRepository(poolA))
+	svcB := NewAuthServiceWithTokens(repo.NewUserRepository(poolB), "secret", repo.NewRefreshTokenRepository(poolB))
+
+	if _, err := svcA.Register(ctx, "cross@test.dev", "rahasia-panjang-123", "U"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	_, pair, err := svcA.Login(ctx, "cross@test.dev", "rahasia-panjang-123")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		success int
+		unauth  int
+	)
+	wg.Add(2)
+	for _, svc := range []*AuthService{svcA, svcB} {
+		go func(s *AuthService) {
+			defer wg.Done()
+			_, rerr := s.Refresh(ctx, pair.RefreshToken)
+			mu.Lock()
+			defer mu.Unlock()
+			if rerr == nil {
+				success++
+			} else if pkgerrors.IsUnauthorized(rerr) {
+				unauth++
+			}
+		}(svc)
+	}
+	wg.Wait()
+
+	if success != 1 || unauth != 1 {
+		t.Fatalf("lintas koneksi: harus tepat 1 sukses dan 1 unauthorized, dapat sukses=%d unauth=%d", success, unauth)
+	}
+}
+
+// Pemakaian ulang token legacy harus terdeteksi replay dan mencabut keluarga.
+func TestRotation_LegacyReplayRevokesFamily(t *testing.T) {
+	svc, users := newRotationEnv(t)
+	ctx := context.Background()
+	registerUser(t, svc, "legacyreplay@test.dev", "rahasia-panjang-123")
+	u, err := users.FindByEmail(ctx, "legacyreplay@test.dev")
+	if err != nil {
+		t.Fatalf("FindByEmail: %v", err)
+	}
+	legacy, err := svc.signToken(tokenTypeRefresh, u.ID, time.Now().UTC(), svc.refreshTTL)
+	if err != nil {
+		t.Fatalf("signToken: %v", err)
+	}
+
+	first, err := svc.Refresh(ctx, legacy)
+	if err != nil {
+		t.Fatalf("pemakaian pertama token legacy harus berhasil: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, legacy); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("pemakaian ulang token legacy harus 401, dapat: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, first.RefreshToken); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("token pengganti harus ikut tercabut, dapat: %v", err)
+	}
+}
+
+// Setelah cutoff release+7 hari, token legacy ditolak.
+func TestRotation_LegacyCutoffRejects(t *testing.T) {
+	svc, users := newRotationEnv(t)
+	ctx := context.Background()
+	registerUser(t, svc, "cutoff@test.dev", "rahasia-panjang-123")
+	u, err := users.FindByEmail(ctx, "cutoff@test.dev")
+	if err != nil {
+		t.Fatalf("FindByEmail: %v", err)
+	}
+	legacy, err := svc.signToken(tokenTypeRefresh, u.ID, time.Now().UTC(), svc.refreshTTL)
+	if err != nil {
+		t.Fatalf("signToken: %v", err)
+	}
+	svc.SetLegacyRefreshCutoff(time.Now().Add(-time.Hour))
+	if _, err := svc.Refresh(ctx, legacy); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("token legacy setelah cutoff harus 401, dapat: %v", err)
+	}
+}
+
+// Expiry yang tidak terbaca harus fail closed (tidak boleh lolos jadi sukses).
+func TestRotation_MalformedExpiryFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mal.db")
+	pool, err := db.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	users := repo.NewUserRepository(pool)
+	tokens := repo.NewRefreshTokenRepository(pool)
+	svc := NewAuthServiceWithTokens(users, "secret", tokens)
+
+	if _, err := svc.Register(ctx, "malformed@test.dev", "rahasia-panjang-123", "U"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	_, pair, err := svc.Login(ctx, "malformed@test.dev", "rahasia-panjang-123")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, err := pool.ExecContext(ctx,
+		`UPDATE refresh_tokens SET expires_at = 'bukan-tanggal' WHERE token_hash = ?`,
+		hashToken(pair.RefreshToken)); err != nil {
+		t.Fatalf("update expiry: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("expiry rusak harus ditolak 401, dapat: %v", err)
 	}
 }
