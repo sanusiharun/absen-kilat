@@ -49,6 +49,11 @@ func TestConfig_GraceBoundsRejected(t *testing.T) {
 		{"legacy negatif", "", "-1"},
 		{"legacy di atas maksimum", "", "120"},
 		{"legacy tak bisa diparse", "", "10s"},
+		{"legacy overflow int64 maksimum", "", "9223372036854775807"},
+		{"legacy overflow 2^55", "", "36028797018963968"},
+		{"legacy overflow jadi 30s palsu", "", "36028797018963998"},
+		{"legacy di bawah int64 minimum", "", "-9223372036854775809"},
+		{"durasi string overflow", "9999999999999999999s", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

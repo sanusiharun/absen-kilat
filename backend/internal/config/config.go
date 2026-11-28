@@ -93,6 +93,12 @@ func loadReuseGrace() (time.Duration, error) {
 		if err != nil {
 			return 0, fmt.Errorf("REFRESH_REUSE_GRACE_SECONDS: nilai %q bukan bilangan bulat detik", raw)
 		}
+		// Validasi rentang SEBELUM konversi: secs*time.Second dapat overflow
+		// int64 sehingga nilai raksasa berubah menjadi durasi in-range palsu.
+		maxSecs := int(MaxReuseGrace / time.Second)
+		if secs < 0 || secs > maxSecs {
+			return 0, fmt.Errorf("REFRESH_REUSE_GRACE_SECONDS: %d di luar batas 0..%d detik", secs, maxSecs)
+		}
 		return time.Duration(secs) * time.Second, nil
 	}
 	d, err := time.ParseDuration(raw)
