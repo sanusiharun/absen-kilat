@@ -14,3 +14,5 @@ admin/.next/
 
 # Worktree terisolasi worker Hermes Kanban (dibuat otomatis per task)
 .worktrees/
+__pycache__/
+*.pyc
