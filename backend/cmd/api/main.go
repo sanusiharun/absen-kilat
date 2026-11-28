@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -33,6 +32,12 @@ func main() {
 
 	logger := newLogger(cfg.Env)
 	slog.SetDefault(logger)
+
+	// C1b: setelan identity divalidasi saat start; nilai tak valid menolak start.
+	if verr := cfg.ValidateIdentity(); verr != nil {
+		logger.Error("invalid identity configuration", "error", verr)
+		os.Exit(1)
+	}
 
 	// Open database (applies migrations on first run).
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -62,14 +67,8 @@ func main() {
 	qrTokenRepo := repo.NewQrTokenRepository(pool)
 	settingsSvc := service.NewSettingsService(settingsRepo)
 	refreshRepo := repo.NewRefreshTokenRepository(pool)
-	// Jendela grace pemakaian ulang token (C1). Default 10 detik.
-	if graceSec := os.Getenv("REFRESH_REUSE_GRACE_SECONDS"); graceSec != "" {
-		if n, aerr := strconv.Atoi(graceSec); aerr == nil && n >= 0 {
-			refreshRepo.ReuseGrace = time.Duration(n) * time.Second
-		}
-	} else {
-		refreshRepo.ReuseGrace = 10 * time.Second
-	}
+	// Jendela grace pemakaian ulang token (C1), sudah divalidasi di config.
+	refreshRepo.ReuseGrace = cfg.ReuseGrace
 	authSvc := service.NewAuthServiceWithTokens(userRepo, cfg.JWTSecret, refreshRepo)
 	authSvc.LoadLegacyRefreshCutoff(os.Getenv)
 	authSvc.SetEmailVerifications(repo.NewEmailVerificationRepository(pool))
