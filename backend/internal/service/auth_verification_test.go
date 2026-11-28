@@ -52,9 +52,14 @@ func TestVerifyEmail_ConsumeAndStatusAtomic(t *testing.T) {
 	if !got.IsEmailVerified {
 		t.Fatal("status email harus sudah terverifikasi setelah token dikonsumsi")
 	}
-	// Token sudah terpakai: pemakaian kedua ditolak, status tetap terverifikasi.
-	if err := svc.VerifyEmail(ctx, token); err == nil {
+	// Token sudah terpakai: pemakaian kedua ditolak dengan 401 (I11), status
+	// tetap terverifikasi.
+	replayErr := svc.VerifyEmail(ctx, token)
+	if replayErr == nil {
 		t.Fatal("pemakaian kedua token harus ditolak")
+	}
+	if !pkgerrors.IsUnauthorized(replayErr) {
+		t.Fatalf("replay token harus Unauthorized (401), dapat: %v", replayErr)
 	}
 	again, err := users.FindByID(ctx, user.ID)
 	if err != nil {

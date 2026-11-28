@@ -264,7 +264,8 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) error {
 	if !ok {
 		// Token tidak dikenal, sudah dipakai, kedaluwarsa, atau kalah balapan.
 		// Token lama berbasis user id juga jatuh ke sini (ditolak).
-		return pkgerrors.Validation("token", "invalid verification token")
+		// Spec R5/I11: replay token verifikasi dijawab 401, bukan 422.
+		return pkgerrors.Unauthorized("invalid verification token")
 	}
 	return nil
 }
