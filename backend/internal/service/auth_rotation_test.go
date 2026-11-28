@@ -19,7 +19,7 @@ import (
 // Semua memakai database sungguhan (migrasi diterapkan) — tidak ada mock yang bisa
 // menyembunyikan kesalahan transaksi.
 
-func newRotationEnv(t *testing.T) (*AuthService, *repo.UserRepository) {
+func newRotationEnv(t *testing.T) (*AuthService, *repo.UserRepository, *repo.RefreshTokenRepository) {
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "rot.db")
@@ -32,7 +32,7 @@ func newRotationEnv(t *testing.T) (*AuthService, *repo.UserRepository) {
 	users := repo.NewUserRepository(pool)
 	tokens := repo.NewRefreshTokenRepository(pool)
 	svc := NewAuthServiceWithTokens(users, "test-secret", tokens)
-	return svc, users
+	return svc, users, tokens
 }
 
 func registerUser(t *testing.T, svc *AuthService, email, password string) *TokenPair {
@@ -53,7 +53,7 @@ func registerUser(t *testing.T, svc *AuthService, email, password string) *Token
 
 // I13: dua refresh paralel dengan token yang sama — tepat satu berhasil.
 func TestRotation_ConcurrentRefreshSingleWinner(t *testing.T) {
-	svc, _ := newRotationEnv(t)
+	svc, _, _ := newRotationEnv(t)
 	pair := registerUser(t, svc, "concurrent@test.dev", "rahasia-panjang-123")
 
 	var (
@@ -88,7 +88,7 @@ func TestRotation_ConcurrentRefreshSingleWinner(t *testing.T) {
 
 // I14: replay token yang sudah dipakai mencabut seluruh keluarga token.
 func TestRotation_ReplayRevokesFamily(t *testing.T) {
-	svc, _ := newRotationEnv(t)
+	svc, _, _ := newRotationEnv(t)
 	ctx := context.Background()
 	pair := registerUser(t, svc, "replay@test.dev", "rahasia-panjang-123")
 
@@ -109,7 +109,7 @@ func TestRotation_ReplayRevokesFamily(t *testing.T) {
 
 // I8: akun dinonaktifkan tidak bisa memperpanjang sesi.
 func TestRotation_InactiveAccountCannotRefresh(t *testing.T) {
-	svc, users := newRotationEnv(t)
+	svc, users, _ := newRotationEnv(t)
 	ctx := context.Background()
 	pair := registerUser(t, svc, "inactive@test.dev", "rahasia-panjang-123")
 
@@ -129,7 +129,7 @@ func TestRotation_InactiveAccountCannotRefresh(t *testing.T) {
 
 // I9: password berubah menggugurkan semua sesi.
 func TestRotation_PasswordChangeRevokesAllSessions(t *testing.T) {
-	svc, users := newRotationEnv(t)
+	svc, users, _ := newRotationEnv(t)
 	ctx := context.Background()
 	pair := registerUser(t, svc, "pwd@test.dev", "rahasia-panjang-123")
 
@@ -148,7 +148,7 @@ func TestRotation_PasswordChangeRevokesAllSessions(t *testing.T) {
 // I19: refresh token JWT legacy masih diterima sampai kedaluwarsa, lalu di-upgrade
 // menjadi token opaque (tanpa paksa logout massal).
 func TestRotation_LegacyRefreshUpgraded(t *testing.T) {
-	svc, users := newRotationEnv(t)
+	svc, users, _ := newRotationEnv(t)
 	ctx := context.Background()
 	pair := registerUser(t, svc, "legacy@test.dev", "rahasia-panjang-123")
 
@@ -164,6 +164,8 @@ func TestRotation_LegacyRefreshUpgraded(t *testing.T) {
 	if strings.Count(legacy, ".") != 2 {
 		t.Fatalf("token legacy harus berbentuk JWT, dapat %q", legacy)
 	}
+	// C2: cutoff absolut harus diset eksplisit; tanpa itu legacy ditolak.
+	svc.SetLegacyRefreshCutoff(time.Now().Add(24 * time.Hour))
 
 	upgraded, err := svc.Refresh(ctx, legacy)
 	if err != nil {
@@ -184,7 +186,7 @@ func TestRotation_LegacyRefreshUpgraded(t *testing.T) {
 
 // Token baru tidak boleh sama dengan token lama (rotasi benar-benar berganti).
 func TestRotation_TokenChangesOnRefresh(t *testing.T) {
-	svc, _ := newRotationEnv(t)
+	svc, _, _ := newRotationEnv(t)
 	ctx := context.Background()
 	pair := registerUser(t, svc, "rotate@test.dev", "rahasia-panjang-123")
 
@@ -216,6 +218,10 @@ func (f *failingRevokeStore) ConsumeLegacy(context.Context, string, *domain.Refr
 func (f *failingRevokeStore) RevokeFamily(context.Context, string, string) error { return nil }
 
 func (f *failingRevokeStore) RevokeAllForUser(context.Context, string, string) error {
+	return errors.New("storage unavailable")
+}
+
+func (f *failingRevokeStore) UpdatePasswordAtomic(context.Context, string, string, string) error {
 	return errors.New("storage unavailable")
 }
 
@@ -311,7 +317,7 @@ func TestRotation_LockingAcrossConnections(t *testing.T) {
 
 // Pemakaian ulang token legacy harus terdeteksi replay dan mencabut keluarga.
 func TestRotation_LegacyReplayRevokesFamily(t *testing.T) {
-	svc, users := newRotationEnv(t)
+	svc, users, _ := newRotationEnv(t)
 	ctx := context.Background()
 	registerUser(t, svc, "legacyreplay@test.dev", "rahasia-panjang-123")
 	u, err := users.FindByEmail(ctx, "legacyreplay@test.dev")
@@ -323,6 +329,7 @@ func TestRotation_LegacyReplayRevokesFamily(t *testing.T) {
 		t.Fatalf("signToken: %v", err)
 	}
 
+	svc.SetLegacyRefreshCutoff(time.Now().Add(24 * time.Hour))
 	first, err := svc.Refresh(ctx, legacy)
 	if err != nil {
 		t.Fatalf("pemakaian pertama token legacy harus berhasil: %v", err)
@@ -337,7 +344,7 @@ func TestRotation_LegacyReplayRevokesFamily(t *testing.T) {
 
 // Setelah cutoff release+7 hari, token legacy ditolak.
 func TestRotation_LegacyCutoffRejects(t *testing.T) {
-	svc, users := newRotationEnv(t)
+	svc, users, _ := newRotationEnv(t)
 	ctx := context.Background()
 	registerUser(t, svc, "cutoff@test.dev", "rahasia-panjang-123")
 	u, err := users.FindByEmail(ctx, "cutoff@test.dev")
@@ -383,5 +390,147 @@ func TestRotation_MalformedExpiryFailsClosed(t *testing.T) {
 	}
 	if _, err := svc.Refresh(ctx, pair.RefreshToken); !pkgerrors.IsUnauthorized(err) {
 		t.Fatalf("expiry rusak harus ditolak 401, dapat: %v", err)
+	}
+}
+
+// C1: pemakaian ulang di dalam grace ditolak TANPA mencabut keluarga; token
+// pemenang tetap bisa dipakai.
+func TestCorrective_ReuseWithinGraceKeepsFamily(t *testing.T) {
+	svc, _, tokens := newRotationEnv(t)
+	tokens.ReuseGrace = 10 * time.Second
+	ctx := context.Background()
+	pair := registerUser(t, svc, "grace@test.dev", "rahasia-panjang-123")
+
+	winner, err := svc.Refresh(ctx, pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("refresh pertama harus berhasil: %v", err)
+	}
+	// Pakai ulang token lama segera: 401, tetapi keluarga TIDAK dicabut.
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("reuse dalam grace harus 401, dapat: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, winner.RefreshToken); err != nil {
+		t.Fatalf("token pemenang harus tetap bisa dipakai, dapat: %v", err)
+	}
+}
+
+// C1: di luar grace, pemakaian ulang = replay dan mencabut keluarga.
+func TestCorrective_ReuseOutsideGraceRevokes(t *testing.T) {
+	svc, _, tokens := newRotationEnv(t)
+	tokens.ReuseGrace = 0
+	ctx := context.Background()
+	pair := registerUser(t, svc, "nograce@test.dev", "rahasia-panjang-123")
+
+	winner, err := svc.Refresh(ctx, pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("refresh pertama harus berhasil: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("reuse di luar grace harus 401, dapat: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, winner.RefreshToken); !pkgerrors.IsUnauthorized(err) {
+		t.Fatal("token pemenang harus ikut tercabut setelah replay")
+	}
+}
+
+// C1: jejak consumed_at rusak harus fail closed.
+func TestCorrective_MalformedConsumedAtFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	pool, err := db.Open(ctx, filepath.Join(dir, "mc.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+	users := repo.NewUserRepository(pool)
+	tokens := repo.NewRefreshTokenRepository(pool)
+	svc := NewAuthServiceWithTokens(users, "secret", tokens)
+
+	if _, err := svc.Register(ctx, "badconsumed@test.dev", "rahasia-panjang-123", "U"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	_, pair, err := svc.Login(ctx, "badconsumed@test.dev", "rahasia-panjang-123")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); err != nil {
+		t.Fatalf("refresh pertama: %v", err)
+	}
+	if _, err := pool.ExecContext(ctx, `UPDATE refresh_tokens SET consumed_at = 'rusak' WHERE token_hash = ?`,
+		hashToken(pair.RefreshToken)); err != nil {
+		t.Fatalf("update consumed_at: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("consumed_at rusak harus 401, dapat: %v", err)
+	}
+}
+
+// C2: cutoff absolut — tanpa env, legacy ditolak; perilaku sama setelah restart.
+func TestCorrective_LegacyCutoffAbsoluteAcrossRestart(t *testing.T) {
+	svc, users, _ := newRotationEnv(t)
+	ctx := context.Background()
+	registerUser(t, svc, "abs@test.dev", "rahasia-panjang-123")
+	u, err := users.FindByEmail(ctx, "abs@test.dev")
+	if err != nil {
+		t.Fatalf("FindByEmail: %v", err)
+	}
+	legacy, err := svc.signToken(tokenTypeRefresh, u.ID, time.Now().UTC(), svc.refreshTTL)
+	if err != nil {
+		t.Fatalf("signToken: %v", err)
+	}
+	// Tanpa cutoff dikonfigurasi: ditolak (fail closed).
+	if _, err := svc.Refresh(ctx, legacy); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("tanpa cutoff legacy harus ditolak, dapat: %v", err)
+	}
+	// Env tidak valid juga harus menolak, bukan menerima.
+	svc.LoadLegacyRefreshCutoff(func(string) string { return "bukan-tanggal" })
+	if _, err := svc.Refresh(ctx, legacy); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("cutoff tidak valid harus menolak, dapat: %v", err)
+	}
+}
+
+// C4: versi kredensial berubah -> token lama ditolak dan keluarga dicabut.
+func TestCorrective_CredentialVersionMismatchRevokes(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	pool, err := db.Open(ctx, filepath.Join(dir, "cv.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+	users := repo.NewUserRepository(pool)
+	tokens := repo.NewRefreshTokenRepository(pool)
+	svc := NewAuthServiceWithTokens(users, "secret", tokens)
+
+	if _, err := svc.Register(ctx, "cv@test.dev", "rahasia-panjang-123", "U"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	_, pair, err := svc.Login(ctx, "cv@test.dev", "rahasia-panjang-123")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, err := pool.ExecContext(ctx, `UPDATE users SET credential_version = credential_version + 1 WHERE email = ?`,
+		"cv@test.dev"); err != nil {
+		t.Fatalf("bump version: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("versi kredensial berubah harus 401, dapat: %v", err)
+	}
+}
+
+// C4: setelah password berubah atomik, login lama tidak bisa refresh.
+func TestCorrective_PasswordChangeRaceOldLoginCannotRefresh(t *testing.T) {
+	svc, users, _ := newRotationEnv(t)
+	ctx := context.Background()
+	pair := registerUser(t, svc, "race@test.dev", "rahasia-panjang-123")
+	u, err := users.FindByEmail(ctx, "race@test.dev")
+	if err != nil {
+		t.Fatalf("FindByEmail: %v", err)
+	}
+	if err := svc.ChangePassword(ctx, u.ID, "rahasia-panjang-123", "rahasia-baru-456"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if _, err := svc.Refresh(ctx, pair.RefreshToken); !pkgerrors.IsUnauthorized(err) {
+		t.Fatalf("token dari login lama harus ditolak, dapat: %v", err)
 	}
 }

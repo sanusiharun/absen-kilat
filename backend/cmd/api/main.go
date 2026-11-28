@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -61,7 +62,16 @@ func main() {
 	qrTokenRepo := repo.NewQrTokenRepository(pool)
 	settingsSvc := service.NewSettingsService(settingsRepo)
 	refreshRepo := repo.NewRefreshTokenRepository(pool)
+	// Jendela grace pemakaian ulang token (C1). Default 10 detik.
+	if graceSec := os.Getenv("REFRESH_REUSE_GRACE_SECONDS"); graceSec != "" {
+		if n, aerr := strconv.Atoi(graceSec); aerr == nil && n >= 0 {
+			refreshRepo.ReuseGrace = time.Duration(n) * time.Second
+		}
+	} else {
+		refreshRepo.ReuseGrace = 10 * time.Second
+	}
 	authSvc := service.NewAuthServiceWithTokens(userRepo, cfg.JWTSecret, refreshRepo)
+	authSvc.LoadLegacyRefreshCutoff(os.Getenv)
 	attendanceSvc := service.NewAttendanceService(attendanceRepo, locationRepo, settingsSvc, cfg.CutoffHour, service.OfficeConfig{
 		Lat:     cfg.OfficeLat,
 		Lng:     cfg.OfficeLng,

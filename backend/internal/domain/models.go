@@ -21,14 +21,14 @@ const (
 
 // LeaveType is a master leave category (annual/sick/emergency/maternity/paternity).
 type LeaveType struct {
-	ID             string
-	Code           string // annual | sick | emergency | maternity | paternity
-	Name           string
-	DefaultDays    int
-	MaxExtraDays   int // paternity 3/5/7 option
+	ID                 string
+	Code               string // annual | sick | emergency | maternity | paternity
+	Name               string
+	DefaultDays        int
+	MaxExtraDays       int // paternity 3/5/7 option
 	RequiresAttachment bool
-	Active         bool
-	CreatedAt      time.Time
+	Active             bool
+	CreatedAt          time.Time
 }
 
 // LeaveStatus is the lifecycle of a leave request.
@@ -81,10 +81,12 @@ type User struct {
 	ManagerID    string // supervisor (users.id); "" when none
 	EmployeeCode string // unique identifier (QR/manual attendance)
 	// Leave quota (migration 008): English column names.
-	LeaveQuota  int // annual allocation
-	LeaveUsed   int // consumed working days
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	LeaveQuota int // annual allocation
+	LeaveUsed  int // consumed working days
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	// CredentialVersion dinaikkan setiap password berubah; token dengan versi lama ditolak.
+	CredentialVersion int
 }
 
 // AttendanceType distinguishes check-in from check-out records.
