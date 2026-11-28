@@ -51,24 +51,29 @@ type Config struct {
 	// AbsenRadiusM is the maximum distance (meters) from the office at which
 	// an attendance is accepted. 0 disables geofencing.
 	AbsenRadiusM int
+	// TrustedProxies is a comma-separated list of IPs/CIDRs whose
+	// X-Forwarded-For header is trusted for client-IP resolution. Empty means
+	// no proxy is trusted (RemoteAddr is used).
+	TrustedProxies string
 }
 
 // Load reads configuration from environment variables, applying defaults
 // suitable for local development.
 func Load() Config {
 	cfg := Config{
-		Env:           getenv("APP_ENV", "development"),
-		Port:          getenv("PORT", "8090"),
-		DBPath:        getenv("DB_PATH", "data/absen-kilat.db"),
-		CutoffHour:    getenvInt("CUTOFF_HOUR", 9),
-		JWTSecret:     getenv("JWT_SECRET", "dev-secret-change-me"),
-		UploadDir:     getenv("UPLOAD_DIR", "uploads"),
-		PublicBaseURL: getenv("PUBLIC_BASE_URL", "http://localhost:8090"),
-		AdminEmail:    getenv("ADMIN_EMAIL", "admin@absenkilat.dev"),
-		AdminPassword: getenv("ADMIN_PASSWORD", ""),
-		OfficeLat:     getenvFloat("OFFICE_LAT", -6.2088),  // Jakarta Selatan
-		OfficeLng:     getenvFloat("OFFICE_LNG", 106.8456), // Jakarta Selatan
-		AbsenRadiusM:  getenvInt("ABSEN_RADIUS_M", 500),
+		Env:            getenv("APP_ENV", "development"),
+		Port:           getenv("PORT", "8090"),
+		DBPath:         getenv("DB_PATH", "data/absen-kilat.db"),
+		CutoffHour:     getenvInt("CUTOFF_HOUR", 9),
+		JWTSecret:      getenv("JWT_SECRET", "dev-secret-change-me"),
+		UploadDir:      getenv("UPLOAD_DIR", "uploads"),
+		PublicBaseURL:  getenv("PUBLIC_BASE_URL", "http://localhost:8090"),
+		AdminEmail:     getenv("ADMIN_EMAIL", "admin@absenkilat.dev"),
+		AdminPassword:  getenv("ADMIN_PASSWORD", ""),
+		OfficeLat:      getenvFloat("OFFICE_LAT", -6.2088),  // Jakarta Selatan
+		OfficeLng:      getenvFloat("OFFICE_LNG", 106.8456), // Jakarta Selatan
+		AbsenRadiusM:   getenvInt("ABSEN_RADIUS_M", 500),
+		TrustedProxies: getenv("TRUSTED_PROXIES", ""),
 	}
 	cfg.ReuseGrace, cfg.reuseGraceErr = loadReuseGrace()
 	return cfg
