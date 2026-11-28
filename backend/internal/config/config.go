@@ -2,8 +2,19 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	// DefaultReuseGrace adalah jendela grace default untuk pemakaian ulang
+	// refresh token (C1, identity-refresh-corrective).
+	DefaultReuseGrace = 10 * time.Second
+	// MaxReuseGrace adalah batas atas grace yang disetujui (C1b).
+	MaxReuseGrace = 60 * time.Second
 )
 
 // Config holds runtime configuration for the API server.
@@ -31,6 +42,12 @@ type Config struct {
 	OfficeLat float64
 	// OfficeLng is the office longitude.
 	OfficeLng float64
+	// ReuseGrace adalah jendela toleransi pemakaian ulang refresh token yang
+	// sudah dikonsumsi (0 = ketat, tanpa grace). Dimuat dari REFRESH_REUSE_GRACE.
+	ReuseGrace time.Duration
+	// reuseGraceErr menyimpan kegagalan parse env grace agar start bisa
+	// ditolak eksplisit, bukan diam-diam memakai default (C1b).
+	reuseGraceErr error
 	// AbsenRadiusM is the maximum distance (meters) from the office at which
 	// an attendance is accepted. 0 disables geofencing.
 	AbsenRadiusM int
@@ -39,7 +56,7 @@ type Config struct {
 // Load reads configuration from environment variables, applying defaults
 // suitable for local development.
 func Load() Config {
-	return Config{
+	cfg := Config{
 		Env:           getenv("APP_ENV", "development"),
 		Port:          getenv("PORT", "8090"),
 		DBPath:        getenv("DB_PATH", "data/absen-kilat.db"),
@@ -53,6 +70,44 @@ func Load() Config {
 		OfficeLng:     getenvFloat("OFFICE_LNG", 106.8456), // Jakarta Selatan
 		AbsenRadiusM:  getenvInt("ABSEN_RADIUS_M", 500),
 	}
+	cfg.ReuseGrace, cfg.reuseGraceErr = loadReuseGrace()
+	return cfg
+}
+
+// loadReuseGrace membaca REFRESH_REUSE_GRACE (durasi, mis. "10s"). Alias lama
+// REFRESH_REUSE_GRACE_SECONDS (detik) masih diterima agar deploy yang sudah
+// memakainya tidak diam-diam kembali ke default; variabel baru menang.
+func loadReuseGrace() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("REFRESH_REUSE_GRACE"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("REFRESH_REUSE_GRACE_SECONDS"))
+		if raw == "" {
+			return DefaultReuseGrace, nil
+		}
+		secs, err := strconv.Atoi(raw)
+		if err != nil {
+			return 0, fmt.Errorf("REFRESH_REUSE_GRACE_SECONDS: nilai %q bukan bilangan bulat detik", raw)
+		}
+		return time.Duration(secs) * time.Second, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("REFRESH_REUSE_GRACE: nilai %q bukan durasi valid (mis. 10s)", raw)
+	}
+	return d, nil
+}
+
+// ValidateIdentity memvalidasi setelan identity yang harus fail-closed saat
+// start (C1b): grace negatif, tak bisa diparse, atau di atas batas disetujui
+// membuat proses menolak start, bukan memakai nilai diam-diam.
+func (c Config) ValidateIdentity() error {
+	if c.reuseGraceErr != nil {
+		return c.reuseGraceErr
+	}
+	if c.ReuseGrace < 0 || c.ReuseGrace > MaxReuseGrace {
+		return fmt.Errorf("REFRESH_REUSE_GRACE: %s di luar batas 0s..%s", c.ReuseGrace, MaxReuseGrace)
+	}
+	return nil
 }
 
 func getenv(key, fallback string) string {
