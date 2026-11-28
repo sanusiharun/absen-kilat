@@ -17,3 +17,4 @@ Baseline source: 0413c9ccdeb0 (main setelah PR #54, #55, #68; sebelumnya d082b13
 - features/INDEX.md
 - ../../openspec/changes/dashboard-redesign/proposal.md
 Hermes runtime dispatch is disabled until onboarding and acceptance.
+- reviews/2026-11-28-pr71-identity-slice2-audit.md — audit read-only PR #71 (R3/R8, task 7230320388)
