@@ -112,6 +112,12 @@ func main() {
 	projectSvc := service.NewProjectService(partnerRepo, projectRepo, assignmentRepo, userRepo)
 	projectHandler := transport.NewProjectHandler(projectSvc)
 
+	// Shift (EPIC #60 S2): master data jadwal kerja 24/7. Service ini sengaja
+	// tidak menyentuh absensi; perhitungan telat dari shift adalah S3.
+	shiftRepo := repo.NewShiftRepository(pool)
+	shiftSvc := service.NewShiftService(shiftRepo, locationRepo)
+	shiftHandler := transport.NewShiftHandler(shiftSvc)
+
 	// Access control: menu registry lives in code (internal/authz), assignments
 	// in the database (role template + per-user overrides).
 	accessRepo := repo.NewAccessRepository(pool)
@@ -201,6 +207,7 @@ func main() {
 				leaveHandler.RegisterAdminRoutes(r)
 				overtimeHandler.RegisterAdminRoutes(r)
 				projectHandler.RegisterAdminRoutes(r)
+				shiftHandler.RegisterRoutes(r)
 				accessHandler.RegisterAdminRoutes(r)
 			})
 

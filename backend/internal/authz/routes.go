@@ -37,6 +37,12 @@ var routes = []RouteRule{
 	{"POST", "/admin/qr", Permission("lokasi", ActionCreate)},
 	{"DELETE", "/admin/qr/{id}", Permission("lokasi", ActionDelete)},
 
+	// Shift (EPIC #60 S2): master data jadwal kerja. Tanpa DELETE endpoint —
+	// non-aktifkan lewat PATCH {active:false}.
+	{"GET", "/admin/shifts", Permission("shift", ActionView)},
+	{"POST", "/admin/shifts", Permission("shift", ActionCreate)},
+	{"PATCH", "/admin/shifts/{id}", Permission("shift", ActionUpdate)},
+
 	// Absensi
 	{"GET", "/admin/attendance", Permission("absensi", ActionView)},
 	{"PATCH", "/admin/attendance/{id}", Permission("absensi", ActionOverride)},
