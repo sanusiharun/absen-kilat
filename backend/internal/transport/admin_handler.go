@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,6 +23,7 @@ type adminService interface {
 	Trends(ctx context.Context, loc *time.Location, days int) ([]service.DayTrend, error)
 	Reports(ctx context.Context, loc *time.Location, days int) ([]service.DayReport, error)
 	UserReports(ctx context.Context, loc *time.Location, days int) ([]service.UserReport, error)
+	ExportAttendance(ctx context.Context, loc *time.Location, from, to string) ([]service.ExportRow, error)
 	Locations(ctx context.Context, limit int) ([]domain.LocationStat, error)
 	ListAttendances(ctx context.Context, f service.AttendanceFilter) ([]service.AdminAttendance, int, error)
 	CreateUser(ctx context.Context, in service.CreateUserInput) (*domain.User, error)
@@ -65,6 +67,7 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/admin/locations/breakdown", h.locationsBreakdown)
 	r.Get("/admin/reports", h.reports)
 	r.Get("/admin/reports/users", h.userReports)
+	r.Get("/admin/reports/export", h.reportsExport)
 	r.Get("/admin/attendance", h.attendance)
 	r.Patch("/admin/attendance/{id}", h.overrideAttendance)
 	r.Get("/admin/devices", h.devices)
@@ -792,4 +795,30 @@ func pct(part, total int) float64 {
 		return 0
 	}
 	return float64(part) / float64(total) * 100
+}
+
+// reportsExport menyajikan laporan kehadiran sebagai CSV berentang. Streaming
+// dipakai supaya dataset besar tidak ditahan seluruhnya di memori.
+func (h *AdminHandler) reportsExport(w http.ResponseWriter, r *http.Request) {
+	if format := r.URL.Query().Get("format"); format != "" && format != "csv" {
+		httpx.WriteHTTPError(w, httpx.ErrBadRequest)
+		return
+	}
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+
+	rows, err := h.svc.ExportAttendance(r.Context(), time.Local, from, to)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+
+	filename := "absen-" + from + "_" + to + ".csv"
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	if werr := service.WriteAttendanceCSV(w, rows); werr != nil {
+		// Header sudah terkirim; kegagalan tulis hanya bisa dicatat.
+		slog.Error("reports: gagal menulis CSV", "error", werr)
+	}
 }
