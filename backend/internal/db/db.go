@@ -25,7 +25,7 @@ var migrationsFS embed.FS
 
 // dsn builds the SQLite DSN with pragmas applied at open time.
 func dsn(path string) string {
-	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
+	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate", path)
 }
 
 // Open opens (and creates if needed) the SQLite database at path, then applies
