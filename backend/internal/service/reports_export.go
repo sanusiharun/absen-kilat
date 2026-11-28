@@ -16,6 +16,17 @@ import (
 // dataset raksasa dari VPS kecil.
 const MaxExportDays = 92
 
+// exportPageSize adalah ukuran satu halaman query. Nilainya sama dengan batas
+// keras ListAdmin (repo meng-clamp limit ke 500), jadi paginasi berjalan penuh
+// tanpa ada baris yang dipotong diam-diam.
+const exportPageSize = 500
+
+// MaxExportRows adalah plafon keamanan ekspor. Di atas plafon ini permintaan
+// DITOLAK dengan error eksplisit (bukan CSV parsial): sebelumnya ekspor meminta
+// 100000 baris, repo meng-clamp ke 500, dan klien menerima 200 + CSV terpotong
+// tanpa tanda apa pun. Variabel (bukan konstanta) supaya tes bisa menurunkannya.
+var MaxExportRows = 100000
+
 // ExportRow adalah satu baris CSV laporan kehadiran (kontrak di docs).
 type ExportRow struct {
 	Date           string
@@ -64,6 +75,11 @@ func ParseExportRange(fromRaw, toRaw string, loc *time.Location) (time.Time, tim
 
 // ExportAttendance mengambil baris kehadiran pada rentang tanggal (inklusif),
 // memakai zona waktu pemanggil agar batas hari konsisten dengan /admin/stats.
+//
+// Seluruh baris pada rentang diambil lewat paginasi (offset bertahap) sehingga
+// tidak ada pemotongan diam-diam pada 500 baris. Bila jumlah baris melebihi
+// MaxExportRows, permintaan ditolak dengan error validasi yang menyebut jumlah
+// baris sebenarnya — klien tidak pernah menerima CSV parsial tanpa penjelasan.
 func (s *AdminService) ExportAttendance(ctx context.Context, loc *time.Location, fromRaw, toRaw string) ([]ExportRow, error) {
 	from, to, err := ParseExportRange(fromRaw, toRaw, loc)
 	if err != nil {
@@ -72,40 +88,62 @@ func (s *AdminService) ExportAttendance(ctx context.Context, loc *time.Location,
 	start := from.UTC()
 	end := to.AddDate(0, 0, 1).UTC()
 
-	rows, _, err := s.attendances.ListAdmin(ctx, repo.AdminAttendanceFilter{
-		From:  start,
-		To:    end,
-		Limit: 100000,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]ExportRow, 0, len(rows))
-	for _, r := range rows {
-		dist := ""
-		if r.DistanceM.Valid {
-			dist = strconv.FormatInt(r.DistanceM.Int64, 10)
-		}
-		out = append(out, ExportRow{
-			Date:           exportDate(r.OccurredAt, loc),
-			NIP:            "", // NIP belum diekspos repo baris admin; lihat docs/EXPORT-SCHEMA.md
-			Name:           r.UserName,
-			Email:          r.UserEmail,
-			Type:           r.Type,
-			Status:         r.Status,
-			ApprovalStatus: r.ApprovalStatus,
-			Source:         r.Source,
-			Device:         r.Device,
-			IPAddress:      r.IPAddress,
-			DistanceM:      dist,
+	var out []ExportRow
+	offset := 0
+	for {
+		rows, total, err := s.attendances.ListAdmin(ctx, repo.AdminAttendanceFilter{
+			From:   start,
+			To:     end,
+			Limit:  exportPageSize,
+			Offset: offset,
 		})
+		if err != nil {
+			return nil, err
+		}
+		if total > MaxExportRows {
+			return nil, pkgerrors.Validation("range", fmt.Sprintf(
+				"rentang memuat %d baris (plafon %d); persempit rentang tanggal atau filter laporan",
+				total, MaxExportRows))
+		}
+		for _, r := range rows {
+			out = append(out, newExportRow(r, loc))
+		}
+		offset += len(rows)
+		if len(rows) == 0 || len(rows) < exportPageSize || offset >= total {
+			break
+		}
 	}
 	return out, nil
 }
 
+// newExportRow memetakan satu baris admin ke baris CSV laporan.
+func newExportRow(r repo.AdminAttendanceRow, loc *time.Location) ExportRow {
+	dist := ""
+	if r.DistanceM.Valid {
+		dist = strconv.FormatInt(r.DistanceM.Int64, 10)
+	}
+	return ExportRow{
+		Date:           exportDate(r.OccurredAt, loc),
+		NIP:            "", // NIP belum diekspos repo baris admin; lihat docs/EXPORT-SCHEMA.md
+		Name:           r.UserName,
+		Email:          r.UserEmail,
+		Type:           r.Type,
+		Status:         r.Status,
+		ApprovalStatus: r.ApprovalStatus,
+		Source:         r.Source,
+		Device:         r.Device,
+		IPAddress:      r.IPAddress,
+		DistanceM:      dist,
+	}
+}
+
 // WriteAttendanceCSV menulis CSV memakai encoding/csv sehingga escaping koma,
 // tanda kutip, dan newline ditangani standar.
+//
+// Setiap sel dilewatkan sanitizeCSVCell lebih dulu: nilai yang dimulai dengan
+// karakter pemicu formula spreadsheet di-escape supaya isian pengguna (nama,
+// perangkat, alamat IP) tidak bisa menjalankan formula di Excel/Sheets saat
+// laporan dibuka admin.
 func WriteAttendanceCSV(w io.Writer, rows []ExportRow) error {
 	cw := csv.NewWriter(w)
 	if err := cw.Write(AttendanceCSVHeader); err != nil {
@@ -113,14 +151,30 @@ func WriteAttendanceCSV(w io.Writer, rows []ExportRow) error {
 	}
 	for _, r := range rows {
 		if err := cw.Write([]string{
-			r.Date, r.NIP, r.Name, r.Email, r.Type, r.Status,
-			r.ApprovalStatus, r.Source, r.Device, r.IPAddress, r.DistanceM,
+			sanitizeCSVCell(r.Date), sanitizeCSVCell(r.NIP), sanitizeCSVCell(r.Name),
+			sanitizeCSVCell(r.Email), sanitizeCSVCell(r.Type), sanitizeCSVCell(r.Status),
+			sanitizeCSVCell(r.ApprovalStatus), sanitizeCSVCell(r.Source),
+			sanitizeCSVCell(r.Device), sanitizeCSVCell(r.IPAddress), sanitizeCSVCell(r.DistanceM),
 		}); err != nil {
 			return fmt.Errorf("reports.WriteAttendanceCSV: row: %w", err)
 		}
 	}
 	cw.Flush()
 	return cw.Error()
+}
+
+// sanitizeCSVCell menetralkan CSV formula injection (OWASP): sel yang dimulai
+// dengan = + - @ TAB CR dianggap formula oleh Excel/Sheets/LibreOffice, sehingga
+// diberi awalan kutip tunggal agar tetap tampil sebagai teks.
+func sanitizeCSVCell(v string) string {
+	if v == "" {
+		return v
+	}
+	switch v[0] {
+	case '=', '+', '-', '@', '	', '\r', '\v', '\f':
+		return "'" + v
+	}
+	return v
 }
 
 // exportDate mengubah timestamp RFC3339 dari repo menjadi tanggal lokal pemanggil.

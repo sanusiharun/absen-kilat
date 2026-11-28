@@ -340,7 +340,7 @@ func (r *AttendanceRepository) ListAdmin(ctx context.Context, f AdminAttendanceF
 			a.rejection_reason, a.location_id, a.occurred_at
 		FROM attendances a
 		JOIN users u ON u.id = a.user_id`+where+`
-		ORDER BY a.occurred_at DESC
+		ORDER BY a.occurred_at DESC, a.id DESC
 		LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("repo.AttendanceRepository.ListAdmin: %w", err)
@@ -511,7 +511,7 @@ func (r *AttendanceRepository) ListForApproval(ctx context.Context, f Attendance
 			a.rejection_reason, a.location_id, a.occurred_at
 		FROM attendances a
 		JOIN users u ON u.id = a.user_id`+where+`
-		ORDER BY a.occurred_at DESC
+		ORDER BY a.occurred_at DESC, a.id DESC
 		LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, fmt.Errorf("repo.AttendanceRepository.ListForApproval: %w", err)
