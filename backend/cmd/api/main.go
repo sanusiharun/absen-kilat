@@ -60,7 +60,8 @@ func main() {
 	notificationRepo := repo.NewNotificationRepository(gdb)
 	qrTokenRepo := repo.NewQrTokenRepository(pool)
 	settingsSvc := service.NewSettingsService(settingsRepo)
-	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
+	refreshRepo := repo.NewRefreshTokenRepository(pool)
+	authSvc := service.NewAuthServiceWithTokens(userRepo, cfg.JWTSecret, refreshRepo)
 	attendanceSvc := service.NewAttendanceService(attendanceRepo, locationRepo, settingsSvc, cfg.CutoffHour, service.OfficeConfig{
 		Lat:     cfg.OfficeLat,
 		Lng:     cfg.OfficeLng,
