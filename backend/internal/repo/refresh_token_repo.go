@@ -146,13 +146,24 @@ func (r *RefreshTokenRepository) Rotate(ctx context.Context, tokenHash string, n
 
 	next.FamilyID = familyID
 	next.UserID = userID
-	next.CredentialVersion = tokenVersion
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, ip, user_agent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	// Versi kredensial diwarisi dari token induk lewat INSERT ... SELECT, bukan
+	// dari aplikasi: baris induk sudah dikonsumsi di transaksi ini, sehingga
+	// token pengganti tidak bisa lahir dengan versi default 0 (C4).
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, ip, user_agent, credential_version)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, credential_version FROM refresh_tokens
+		  WHERE id = ? AND consumed_at IS NOT NULL`,
 		next.ID, userID, familyID, next.TokenHash, fmtTime(next.IssuedAt), fmtTime(next.ExpiresAt),
-		next.IP, next.UserAgent); err != nil {
+		next.IP, next.UserAgent, id)
+	if err != nil {
 		return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: insert next: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: insert rows: %w", err)
+	}
+	if n != 1 {
+		return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: insert next: %w", domain.ErrCredentialVersionChanged)
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -59,3 +60,8 @@ type RefreshTokenRepository interface {
 	// RevokeAllForUser revokes every family of a user (password/role change).
 	RevokeAllForUser(ctx context.Context, userID, reason string) error
 }
+
+// ErrCredentialVersionChanged menandai token pengganti tidak bisa diwarisi dari
+// token induk karena versi kredensial berubah (password diganti) — rotasi
+// dibatalkan, bukan menerbitkan token dengan versi default (C4).
+var ErrCredentialVersionChanged = errors.New("refresh: credential version changed")
