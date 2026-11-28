@@ -21,6 +21,11 @@ type SMTPEmailSender struct {
 	User string
 	Pass string
 	From string
+	// Timeout membatasi seluruh percakapan SMTP (dial, TLS, auth, kirim).
+	Timeout time.Duration
+	// RequireTLS menolak server yang tidak mendukung STARTTLS. Default true:
+	// token verifikasi tidak boleh lewat koneksi tanpa TLS.
+	RequireTLS bool
 	// DialOpsional untuk tes: mengganti koneksi TCP.
 	Dial func(addr string) (net.Conn, error)
 }
@@ -39,12 +44,20 @@ func NewSMTPEmailSenderFromEnv(getenv func(string) string) (*SMTPEmailSender, bo
 			port = n
 		}
 	}
+	timeout := 10 * time.Second
+	if raw := strings.TrimSpace(getenv("SMTP_TIMEOUT_SECONDS")); raw != "" {
+		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 && secs <= 60 {
+			timeout = time.Duration(secs) * time.Second
+		}
+	}
 	return &SMTPEmailSender{
-		Host: host,
-		Port: port,
-		User: strings.TrimSpace(getenv("SMTP_USER")),
-		Pass: getenv("SMTP_PASS"),
-		From: from,
+		Host:       host,
+		Port:       port,
+		User:       strings.TrimSpace(getenv("SMTP_USER")),
+		Pass:       getenv("SMTP_PASS"),
+		From:       from,
+		Timeout:    timeout,
+		RequireTLS: true,
 	}, true
 }
 
@@ -68,65 +81,78 @@ func buildVerificationMessage(from, to, token string) []byte {
 	return []byte(msg)
 }
 
-// SendVerification mengirim token ke pemilik alamat tujuan.
-func (s *SMTPEmailSender) SendVerification(_ context.Context, to, token string) error {
+// SendVerification mengirim token ke pemilik alamat tujuan lewat SMTP dengan
+// TLS wajib dan batas waktu tegas (tidak boleh menggantung).
+func (s *SMTPEmailSender) SendVerification(ctx context.Context, to, token string) error {
 	if s == nil || s.Host == "" || s.From == "" {
 		return errNoEmailTransport
 	}
+	timeout := s.Timeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+
 	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
-	msg := buildVerificationMessage(s.From, to, token)
+	dial := s.Dial
+	if dial == nil {
+		dialer := &net.Dialer{Timeout: timeout}
+		dial = func(a string) (net.Conn, error) { return dialer.DialContext(ctx, "tcp", a) }
+	}
+	conn, err := dial(addr)
+	if err != nil {
+		slog.Error("email: koneksi SMTP gagal", "host", s.Host, "error", err)
+		return fmt.Errorf("email: dial: %w", err)
+	}
+	// Deadline di level koneksi: mencegah hang pada TLS/auth/kirim.
+	if derr := conn.SetDeadline(deadline); derr != nil {
+		_ = conn.Close()
+		return fmt.Errorf("email: set deadline: %w", derr)
+	}
 
-	var auth smtp.Auth
+	c, err := smtp.NewClient(conn, s.Host)
+	if err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("email: client: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if terr := c.StartTLS(&tls.Config{ServerName: s.Host, MinVersion: tls.VersionTLS12}); terr != nil {
+			return fmt.Errorf("email: starttls: %w", terr)
+		}
+	} else if s.RequireTLS {
+		// Token verifikasi tidak boleh terkirim tanpa TLS.
+		return fmt.Errorf("email: server tidak mendukung STARTTLS, pengiriman dibatalkan")
+	}
+
 	if s.User != "" {
-		auth = smtp.PlainAuth("", s.User, s.Pass, s.Host)
+		if aerr := c.Auth(smtp.PlainAuth("", s.User, s.Pass, s.Host)); aerr != nil {
+			return fmt.Errorf("email: auth: %w", aerr)
+		}
 	}
-
-	if s.Dial != nil {
-		// Jalur tes: kirim lewat koneksi yang disuntikkan.
-		conn, err := s.Dial(addr)
-		if err != nil {
-			slog.Error("email: koneksi SMTP gagal", "host", s.Host, "error", err)
-			return fmt.Errorf("email: dial: %w", err)
-		}
-		c, err := smtp.NewClient(conn, s.Host)
-		if err != nil {
-			return fmt.Errorf("email: client: %w", err)
-		}
-		defer func() { _ = c.Close() }()
-		if ok, _ := c.Extension("STARTTLS"); ok {
-			if err := c.StartTLS(&tls.Config{ServerName: s.Host, MinVersion: tls.VersionTLS12}); err != nil {
-				return fmt.Errorf("email: starttls: %w", err)
-			}
-		}
-		if auth != nil {
-			if err := c.Auth(auth); err != nil {
-				return fmt.Errorf("email: auth: %w", err)
-			}
-		}
-		if err := c.Mail(s.From); err != nil {
-			return fmt.Errorf("email: mail from: %w", err)
-		}
-		if err := c.Rcpt(to); err != nil {
-			return fmt.Errorf("email: rcpt: %w", err)
-		}
-		wc, err := c.Data()
-		if err != nil {
-			return fmt.Errorf("email: data: %w", err)
-		}
-		if _, err := wc.Write(msg); err != nil {
-			return fmt.Errorf("email: write: %w", err)
-		}
-		if err := wc.Close(); err != nil {
-			return fmt.Errorf("email: close: %w", err)
-		}
-		return c.Quit()
+	if merr := c.Mail(s.From); merr != nil {
+		return fmt.Errorf("email: mail from: %w", merr)
 	}
-
-	if err := smtp.SendMail(addr, auth, s.From, []string{to}, msg); err != nil {
-		// Pesan error SMTP tidak memuat body, jadi token tidak bocor lewat log.
-		slog.Error("email: kirim verifikasi gagal", "host", s.Host, "error", err)
-		return fmt.Errorf("email: send: %w", err)
+	if rerr := c.Rcpt(to); rerr != nil {
+		return fmt.Errorf("email: rcpt: %w", rerr)
 	}
-	slog.Info("email: token verifikasi terkirim", "host", s.Host)
+	wc, werr := c.Data()
+	if werr != nil {
+		return fmt.Errorf("email: data: %w", werr)
+	}
+	if _, xerr := wc.Write(buildVerificationMessage(s.From, to, token)); xerr != nil {
+		return fmt.Errorf("email: write: %w", xerr)
+	}
+	if cerr := wc.Close(); cerr != nil {
+		return fmt.Errorf("email: close: %w", cerr)
+	}
+	if qerr := c.Quit(); qerr != nil {
+		return fmt.Errorf("email: quit: %w", qerr)
+	}
+	slog.Info("email: token verifikasi terkirim", "host", s.Host, "tls", true)
 	return nil
 }

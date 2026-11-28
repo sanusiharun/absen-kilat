@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sanusi/absen-kilat/backend/internal/db"
 	"github.com/sanusi/absen-kilat/backend/internal/repo"
@@ -105,5 +106,67 @@ func TestRegister_ProductionWithTransportWorks(t *testing.T) {
 	}
 	if err := svc.VerifyEmail(ctx, token); err != nil {
 		t.Fatalf("token dari transport harus bisa memverifikasi: %v", err)
+	}
+}
+
+// TLS wajib: server tanpa STARTTLS harus ditolak, token tidak dikirim.
+func TestSMTP_RequiresStartTLS(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, aerr := ln.Accept()
+		if aerr != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = conn.Write([]byte("220 fake ESMTP\r\n"))
+		buf := make([]byte, 512)
+		_, _ = conn.Read(buf) // EHLO
+		// Sengaja TANPA baris STARTTLS.
+		_, _ = conn.Write([]byte("250-fake\r\n250 OK\r\n"))
+		time.Sleep(300 * time.Millisecond)
+	}()
+
+	sender := &SMTPEmailSender{
+		Host: "127.0.0.1", Port: ln.Addr().(*net.TCPAddr).Port,
+		From: "noreply@absenkilat.dev", Timeout: 3 * time.Second, RequireTLS: true,
+	}
+	err = sender.SendVerification(context.Background(), "user@tujuan.dev", "TOKEN-TLS")
+	if err == nil {
+		t.Fatal("server tanpa STARTTLS harus ditolak")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "starttls") {
+		t.Fatalf("error harus menyebut STARTTLS, dapat: %v", err)
+	}
+	if strings.Contains(err.Error(), "TOKEN-TLS") {
+		t.Fatal("token tidak boleh muncul di pesan error")
+	}
+}
+
+// Timeout: server yang tidak pernah menyapa tidak boleh membuat pengiriman menggantung.
+func TestSMTP_TimeoutEnforced(t *testing.T) {
+	client, server := net.Pipe() // server tidak pernah menulis
+	defer func() { _ = server.Close() }()
+
+	sender := &SMTPEmailSender{
+		Host: "pipe.local", Port: 587, From: "noreply@absenkilat.dev",
+		Timeout: 200 * time.Millisecond, RequireTLS: true,
+		Dial: func(string) (net.Conn, error) { return client, nil },
+	}
+	start := time.Now()
+	err := sender.SendVerification(context.Background(), "user@tujuan.dev", "TOKEN-TIMEOUT")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("pengiriman ke server diam harus gagal")
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("timeout tidak ditegakkan, butuh %v", elapsed)
+	}
+	if strings.Contains(err.Error(), "TOKEN-TIMEOUT") {
+		t.Fatal("token tidak boleh muncul di pesan error")
 	}
 }
