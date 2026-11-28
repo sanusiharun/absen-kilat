@@ -52,6 +52,9 @@ var menus = []Menu{
 	{Key: "absensi", Label: "Absensi", Href: "/absensi", Actions: []Action{ActionView, ActionOverride}, Scope: ScopeTeam},
 	{Key: "laporan", Label: "Laporan", Href: "/laporan", Actions: []Action{ActionView, ActionExport}, Scope: ScopeTeam},
 	{Key: "lokasi", Label: "Lokasi", Href: "/lokasi", Actions: []Action{ActionView, ActionCreate, ActionUpdate, ActionDelete}, Scope: ScopeAll},
+	// Shift (EPIC #60): master data jadwal kerja 24/7. Soft delete lewat
+	// PATCH {active:false}, karena itu tidak ada ActionDelete.
+	{Key: "shift", Label: "Shift", Href: "/shift", Actions: []Action{ActionView, ActionCreate, ActionUpdate}, Scope: ScopeAll},
 	{Key: "device", Label: "Device", Href: "/device", Actions: []Action{ActionView}, Scope: ScopeAll},
 	{Key: "cuti", Label: "Cuti", Href: "/cuti", Actions: []Action{ActionView, ActionApprove}, Scope: ScopeTeam},
 	{Key: "lembur", Label: "Lembur", Href: "/lembur", Actions: []Action{ActionView, ActionApprove}, Scope: ScopeTeam},
