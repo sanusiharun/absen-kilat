@@ -40,9 +40,11 @@ func (r *EmailVerificationRepository) Issue(ctx context.Context, id, userID, tok
 	return tx.Commit()
 }
 
-// Consume menandai token terpakai secara atomik dan mengembalikan user id.
-// ok=false berarti token tidak dikenal, sudah dipakai, atau kedaluwarsa.
-func (r *EmailVerificationRepository) Consume(ctx context.Context, tokenHash string) (string, bool, error) {
+// ConsumeAndVerify menandai token terpakai DAN menandai email user terverifikasi
+// dalam SATU transaksi, sehingga tidak mungkin token hangus tanpa status berubah
+// (dan sebaliknya). ok=false berarti token tidak dikenal, sudah dipakai, atau
+// kedaluwarsa. Pemanggilan paralel dengan token sama hanya bisa berhasil sekali.
+func (r *EmailVerificationRepository) ConsumeAndVerify(ctx context.Context, tokenHash string) (string, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", false, fmt.Errorf("emailverif.Consume: begin: %w", err)
@@ -69,10 +71,20 @@ func (r *EmailVerificationRepository) Consume(ctx context.Context, tokenHash str
 	if perr != nil || time.Now().UTC().After(exp) {
 		return "", false, nil // fail closed
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE email_verifications SET consumed_at = ? WHERE id = ?`,
-		fmtTime(time.Now().UTC()), id); err != nil {
+	now := fmtTime(time.Now().UTC())
+	// Guard konsumsi: hanya berhasil bila belum consumed. rowcount 0 berarti
+	// request lain sudah lebih dulu memakai token ini (concurrent consume).
+	res, err := tx.ExecContext(ctx,
+		`UPDATE email_verifications SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL`, now, id)
+	if err != nil {
 		return "", false, fmt.Errorf("emailverif.Consume: update: %w", err)
+	}
+	if n, rerr := res.RowsAffected(); rerr != nil || n != 1 {
+		return "", false, nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE users SET is_email_verified = 1 WHERE id = ?`, userID); err != nil {
+		return "", false, fmt.Errorf("emailverif.Consume: verify user: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return "", false, fmt.Errorf("emailverif.Consume: commit: %w", err)

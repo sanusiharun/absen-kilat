@@ -254,21 +254,19 @@ func (s *AuthService) VerifyEmail(ctx context.Context, token string) error {
 	if s.verifications == nil {
 		return pkgerrors.Internal(errors.New("verifikasi email belum dikonfigurasi"))
 	}
-	userID, ok, err := s.verifications.Consume(ctx, hashToken(token))
+	// Konsumsi token dan penandaan email terverifikasi terjadi dalam satu
+	// transaksi di repo: tidak ada jendela di mana token hangus tetapi status
+	// email belum berubah, dan pemakaian paralel hanya bisa berhasil sekali.
+	_, ok, err := s.verifications.ConsumeAndVerify(ctx, hashToken(token))
 	if err != nil {
 		return err
 	}
 	if !ok {
-		// Token acak yang tidak dikenal, sudah dipakai, atau kedaluwarsa.
+		// Token tidak dikenal, sudah dipakai, kedaluwarsa, atau kalah balapan.
 		// Token lama berbasis user id juga jatuh ke sini (ditolak).
 		return pkgerrors.Validation("token", "invalid verification token")
 	}
-	user, err := s.users.FindByID(ctx, userID)
-	if err != nil {
-		return err
-	}
-	user.IsEmailVerified = true
-	return s.users.Update(ctx, user)
+	return nil
 }
 
 // ForgotPassword generates a reset token for the given email. The token is

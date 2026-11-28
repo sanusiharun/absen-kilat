@@ -14,7 +14,7 @@ import (
 // EmailVerificationStore menyimpan token verifikasi email sekali pakai.
 type EmailVerificationStore interface {
 	Issue(ctx context.Context, id, userID, tokenHash string, expiresAt time.Time) error
-	Consume(ctx context.Context, tokenHash string) (string, bool, error)
+	ConsumeAndVerify(ctx context.Context, tokenHash string) (string, bool, error)
 }
 
 // verificationTTL membatasi umur token verifikasi email.
