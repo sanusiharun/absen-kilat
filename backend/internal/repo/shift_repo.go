@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,18 @@ type ShiftRepository struct {
 
 // NewShiftRepository creates a ShiftRepository.
 func NewShiftRepository(db *sql.DB) *ShiftRepository { return &ShiftRepository{db: db} }
+
+// constShiftCodeIndex adalah nama index unik lower(code) pada tabel shifts.
+const constShiftCodeIndex = "idx_shifts_code"
+
+// wrapShiftErr memetakan pelanggaran unique index kode ke error domain agar
+// handler dapat menjawab 400 VALIDATION tanpa mencocokkan string SQLite sendiri.
+func wrapShiftErr(op string, err error) error {
+	if err != nil && strings.Contains(err.Error(), constShiftCodeIndex) {
+		return fmt.Errorf("shift.%s: %w", op, domain.ErrShiftCodeExists)
+	}
+	return fmt.Errorf("shift.%s: %w", op, err)
+}
 
 // CreateShift menyimpan definisi shift baru.
 func (r *ShiftRepository) CreateShift(ctx context.Context, s *domain.Shift) error {
@@ -34,7 +47,7 @@ func (r *ShiftRepository) CreateShift(ctx context.Context, s *domain.Shift) erro
 		s.ID, s.Code, s.Name, s.StartTime, s.EndTime, boolToInt(s.CrossesMidnight),
 		s.GraceMinutes, s.BreakMinutes, nullable(s.LocationID), boolToInt(s.Active), fmtTime(s.CreatedAt))
 	if err != nil {
-		return fmt.Errorf("shift.CreateShift: %w", err)
+		return wrapShiftErr("CreateShift", err)
 	}
 	return nil
 }
@@ -98,16 +111,20 @@ func (r *ShiftRepository) UpdateShift(ctx context.Context, s *domain.Shift) erro
 		s.Code, s.Name, s.StartTime, s.EndTime, boolToInt(s.CrossesMidnight),
 		s.GraceMinutes, s.BreakMinutes, nullable(s.LocationID), boolToInt(s.Active), s.ID)
 	if err != nil {
-		return fmt.Errorf("shift.UpdateShift: %w", err)
+		return wrapShiftErr("UpdateShift", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("shift.UpdateShift: rows affected: %w", err)
+	}
+	if n == 0 {
 		return domain.ErrShiftNotFound
 	}
 	return nil
 }
 
-// CreateAssignment menolak penugasan yang bertumpuk untuk pegawai yang sama
-// (rentang tanggal inklusif).
+// CreateAssignment menyimpan penugasan apa adanya. Aturan bentrok sengaja tidak
+// diterapkan di sini (lihat komentar interface di domain.ShiftRepository).
 func (r *ShiftRepository) CreateAssignment(ctx context.Context, a *domain.ShiftAssignment) error {
 	if a.ID == "" {
 		a.ID = uuid.NewString()
@@ -119,33 +136,11 @@ func (r *ShiftRepository) CreateAssignment(ctx context.Context, a *domain.ShiftA
 		a.Source = "manual"
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("shift.CreateAssignment: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if a.UserID != "" {
-		var n int
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM shift_assignments
-			  WHERE user_id = ? AND start_date <= ? AND end_date >= ?`,
-			a.UserID, a.EndDate, a.StartDate).Scan(&n); err != nil {
-			return fmt.Errorf("shift.CreateAssignment: overlap: %w", err)
-		}
-		if n > 0 {
-			return domain.ErrShiftOverlap
-		}
-	}
-
-	if _, err := tx.ExecContext(ctx,
+	if _, err := r.db.ExecContext(ctx,
 		`INSERT INTO shift_assignments (id, shift_id, user_id, start_date, end_date, source, created_by, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.ShiftID, nullable(a.UserID), a.StartDate, a.EndDate, a.Source, a.CreatedBy, fmtTime(a.CreatedAt)); err != nil {
-		return fmt.Errorf("shift.CreateAssignment: insert: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("shift.CreateAssignment: commit: %w", err)
+		return fmt.Errorf("shift.CreateAssignment: %w", err)
 	}
 	return nil
 }

@@ -39,13 +39,17 @@ type ShiftRepository interface {
 	ListShifts(ctx context.Context) ([]Shift, error)
 	FindShiftByID(ctx context.Context, id string) (*Shift, error)
 	UpdateShift(ctx context.Context, s *Shift) error
-	// CreateAssignment menolak rentang yang bertumpuk untuk pegawai yang sama.
+	// CreateAssignment menyimpan penugasan apa adanya. Aturan penolakan rentang
+	// bertumpuk sengaja TIDAK diterapkan: proposal shift-247-s1s2 §3 menyatakan
+	// aturan bentrok belum disetujui owner, sehingga menebaknya = mengarang aturan
+	// bisnis. Validasi bentrok menyusul di roster (#65) setelah keputusan owner.
 	CreateAssignment(ctx context.Context, a *ShiftAssignment) error
 	AssignmentsForUser(ctx context.Context, userID, from, to string) ([]ShiftAssignment, error)
 }
 
-// ErrShiftOverlap dikembalikan bila penugasan bertumpuk untuk pegawai yang sama.
-var ErrShiftOverlap = fmt.Errorf("penugasan shift bertumpuk untuk pegawai ini")
-
 // ErrShiftNotFound dikembalikan bila shift tidak ada.
 var ErrShiftNotFound = fmt.Errorf("shift tidak ditemukan")
+
+// ErrShiftCodeExists dikembalikan bila kode shift sudah dipakai (tanpa memandang
+// huruf besar/kecil).
+var ErrShiftCodeExists = fmt.Errorf("kode shift sudah dipakai")
