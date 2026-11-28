@@ -18,8 +18,6 @@ type authService interface {
 	Login(ctx context.Context, email, password string) (*domain.User, *service.TokenPair, error)
 	Refresh(ctx context.Context, refreshToken string) (*service.TokenPair, error)
 	VerifyEmail(ctx context.Context, token string) error
-	// IssueVerificationToken menerbitkan token verifikasi email sekali pakai.
-	IssueVerificationToken(ctx context.Context, userID string) (string, error)
 	ForgotPassword(ctx context.Context, email string) (string, error)
 	ResetPassword(ctx context.Context, resetToken, newPassword string) error
 }
@@ -93,12 +91,6 @@ type userResponse struct {
 
 // --- handlers ---
 
-// registerResponse membawa token verifikasi sekali pakai (pilot tanpa email).
-type registerResponse struct {
-	userResponse
-	VerificationToken string `json:"verification_token"`
-}
-
 func (h *AuthHandler) register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -111,22 +103,12 @@ func (h *AuthHandler) register(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	// Pilot tanpa transport email: token verifikasi dikembalikan SEKALI di respons
-	// pendaftaran supaya alur penerbitan -> verifikasi bisa diuji end-to-end.
-	verificationToken, verr := h.svc.IssueVerificationToken(r.Context(), user.ID)
-	if verr != nil {
-		httpx.WriteError(w, verr)
-		return
-	}
-	httpx.WriteCreated(w, registerResponse{
-		userResponse: userResponse{
-			ID:                  user.ID,
-			Email:               user.Email,
-			Name:                user.Name,
-			IsEmailVerified:     user.IsEmailVerified,
-			NotificationEnabled: user.NotificationEnabled,
-		},
-		VerificationToken: verificationToken,
+	httpx.WriteCreated(w, userResponse{
+		ID:                  user.ID,
+		Email:               user.Email,
+		Name:                user.Name,
+		IsEmailVerified:     user.IsEmailVerified,
+		NotificationEnabled: user.NotificationEnabled,
 	})
 }
 

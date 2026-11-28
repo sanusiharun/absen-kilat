@@ -39,6 +39,10 @@ type AuthService struct {
 	legacyDeadline time.Time
 	// verifications adalah store token verifikasi email sekali pakai (R5).
 	verifications EmailVerificationStore
+	// mailer mengirim token verifikasi ke pemilik email. Nil = tidak tersedia.
+	mailer EmailSender
+	// production menandai lingkungan produksi: tanpa mailer, registrasi ditolak.
+	production bool
 	// tokens adalah store rotasi refresh token. Bila nil, service berjalan dalam
 	// mode legacy (JWT stateless) — hanya dipakai tes lama; main selalu mengisi.
 	tokens domain.RefreshTokenRepository
@@ -59,6 +63,13 @@ func (s *AuthService) LoadLegacyRefreshCutoff(env func(string) string) {
 		return
 	}
 	s.legacyDeadline = ts
+}
+
+// SetEmailSender memasang transport email. production=true berarti tanpa transport
+// registrasi DITOLAK (fail closed) — tidak ada token yang dikembalikan lewat API.
+func (s *AuthService) SetEmailSender(sender EmailSender, production bool) {
+	s.mailer = sender
+	s.production = production
 }
 
 // SetLegacyRefreshCutoff menetapkan batas waktu penerimaan token legacy.
@@ -106,6 +117,11 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 		return nil, fmt.Errorf("service.AuthService.Register: hash: %w", err)
 	}
 
+	if s.production && s.mailer == nil {
+		// Fail closed: tanpa transport email, akun tidak boleh dibuat karena
+		// pemilik email tidak akan pernah bisa memverifikasi.
+		return nil, pkgerrors.Internal(errNoEmailTransport)
+	}
 	user := &domain.User{
 		Email:               email,
 		PasswordHash:        string(hash),
@@ -114,6 +130,18 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 	}
 	if err := s.users.Create(ctx, user); err != nil {
 		return nil, err // already wrapped as conflict/internal by repo
+	}
+	// Terbitkan token verifikasi dan kirim ke PEMILIK EMAIL. Token tidak pernah
+	// dikembalikan ke klien: kepemilikan email harus dibuktikan lewat transport.
+	if s.verifications != nil && s.mailer != nil {
+		token, terr := s.IssueVerificationToken(ctx, user.ID)
+		if terr != nil {
+			return nil, terr
+		}
+		if serr := s.mailer.SendVerification(ctx, user.Email, token); serr != nil {
+			slog.Error("auth: gagal mengirim token verifikasi", "user_id", user.ID, "error", serr)
+			return nil, pkgerrors.Internal(serr)
+		}
 	}
 	return user, nil
 }
