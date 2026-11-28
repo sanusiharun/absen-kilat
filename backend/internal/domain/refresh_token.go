@@ -17,6 +17,9 @@ const (
 	RotateRevoked  RotateOutcome = "revoked"
 	RotateReplay   RotateOutcome = "replay"
 	RotateInactive RotateOutcome = "inactive"
+	// RotateReuseInGrace: token dipakai ulang sangat cepat (mis. dua tab / retry
+	// jaringan). Ditolak TANPA mencabut keluarga (R3 grace).
+	RotateReuseInGrace RotateOutcome = "reuse_in_grace"
 )
 
 // RefreshToken is one row of the rotation store. The raw token is never stored;
@@ -34,6 +37,8 @@ type RefreshToken struct {
 	RevokedReason string
 	IP            string
 	UserAgent     string
+	// CredentialVersion adalah versi kredensial user saat token diterbitkan.
+	CredentialVersion int
 }
 
 // RefreshTokenRepository persists rotation state.
@@ -46,6 +51,9 @@ type RefreshTokenRepository interface {
 	// ConsumeLegacy marks a stateless legacy (JWT) refresh token as consumed and
 	// issues exactly one replacement, atomically. Reuse is reported as replay.
 	ConsumeLegacy(ctx context.Context, tokenHash string, next *RefreshToken) (RotateOutcome, error)
+	// UpdatePasswordAtomic mengganti hash password, menaikkan credential_version,
+	// dan mencabut semua keluarga token dalam SATU transaksi.
+	UpdatePasswordAtomic(ctx context.Context, userID, newHash, reason string) error
 	// RevokeFamily revokes every token of one login family.
 	RevokeFamily(ctx context.Context, familyID, reason string) error
 	// RevokeAllForUser revokes every family of a user (password/role change).

@@ -13,6 +13,9 @@ import (
 // RefreshTokenRepository is the SQLite implementation of the rotation store.
 type RefreshTokenRepository struct {
 	db *sql.DB
+	// ReuseGrace adalah jendela toleransi untuk pemakaian ulang token yang baru
+	// saja dipakai (dua tab / retry jaringan). Nol berarti tanpa toleransi.
+	ReuseGrace time.Duration
 }
 
 // NewRefreshTokenRepository creates a RefreshTokenRepository.
@@ -25,9 +28,9 @@ func fmtTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 // Create stores a brand-new token (start of a family).
 func (r *RefreshTokenRepository) Create(ctx context.Context, t *domain.RefreshToken) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, ip, user_agent)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.UserID, t.FamilyID, t.TokenHash, fmtTime(t.IssuedAt), fmtTime(t.ExpiresAt), t.IP, t.UserAgent)
+		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, ip, user_agent, credential_version)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.UserID, t.FamilyID, t.TokenHash, fmtTime(t.IssuedAt), fmtTime(t.ExpiresAt), t.IP, t.UserAgent, t.CredentialVersion)
 	if err != nil {
 		return fmt.Errorf("typeof refresh.Create: %w", err)
 	}
@@ -47,11 +50,12 @@ func (r *RefreshTokenRepository) Rotate(ctx context.Context, tokenHash string, n
 		id, userID, familyID, expiresAt string
 		consumedAt, revokedAt           sql.NullString
 		revokedReason                   sql.NullString
+		tokenVersion                    int
 	)
 	err = tx.QueryRowContext(ctx,
-		`SELECT id, user_id, family_id, expires_at, consumed_at, revoked_at, revoked_reason
+		`SELECT id, user_id, family_id, expires_at, consumed_at, revoked_at, revoked_reason, credential_version
 		   FROM refresh_tokens WHERE token_hash = ?`, tokenHash).
-		Scan(&id, &userID, &familyID, &expiresAt, &consumedAt, &revokedAt, &revokedReason)
+		Scan(&id, &userID, &familyID, &expiresAt, &consumedAt, &revokedAt, &revokedReason, &tokenVersion)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.RotateNotFound, nil
 	}
@@ -61,7 +65,24 @@ func (r *RefreshTokenRepository) Rotate(ctx context.Context, tokenHash string, n
 
 	now := time.Now().UTC()
 
-	// Replay: token sudah dipakai. Cabut seluruh keluarga lalu tolak.
+	// Reuse dalam jendela grace: tolak TANPA mencabut keluarga (R3 grace).
+	if consumedAt.Valid {
+		consumed, perr := time.Parse(time.RFC3339, consumedAt.String)
+		if perr != nil {
+			// Fail closed: jejak pemakaian tidak terbaca -> jangan izinkan.
+			if err := tx.Commit(); err != nil {
+				return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: commit malformed consumed: %w", err)
+			}
+			return domain.RotateExpired, nil
+		}
+		if r.ReuseGrace > 0 && now.Sub(consumed) <= r.ReuseGrace {
+			if err := tx.Commit(); err != nil {
+				return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: commit grace: %w", err)
+			}
+			return domain.RotateReuseInGrace, nil
+		}
+	}
+	// Replay: token sudah dipakai di luar grace. Cabut seluruh keluarga lalu tolak.
 	if consumedAt.Valid {
 		if err := revokeFamilyTx(ctx, tx, familyID, "replay", now); err != nil {
 			return domain.RotateNotFound, err
@@ -92,9 +113,20 @@ func (r *RefreshTokenRepository) Rotate(ctx context.Context, tokenHash string, n
 		return domain.RotateExpired, nil
 	}
 
-	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT is_active FROM users WHERE id = ?`, userID).Scan(&active); err != nil {
+	var active, userVersion int
+	if err := tx.QueryRowContext(ctx, `SELECT is_active, credential_version FROM users WHERE id = ?`, userID).
+		Scan(&active, &userVersion); err != nil {
 		return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: user: %w", err)
+	}
+	if userVersion != tokenVersion {
+		// Password berubah setelah token terbit: cabut keluarga, tolak.
+		if err := revokeFamilyTx(ctx, tx, familyID, "credential_version_mismatch", now); err != nil {
+			return domain.RotateNotFound, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.RotateNotFound, fmt.Errorf("refresh.Rotate: commit version: %w", err)
+		}
+		return domain.RotateRevoked, nil
 	}
 	if active == 0 {
 		if err := revokeFamilyTx(ctx, tx, familyID, "account_inactive", now); err != nil {
@@ -114,6 +146,7 @@ func (r *RefreshTokenRepository) Rotate(ctx context.Context, tokenHash string, n
 
 	next.FamilyID = familyID
 	next.UserID = userID
+	next.CredentialVersion = tokenVersion
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, ip, user_agent)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -197,13 +230,40 @@ func (r *RefreshTokenRepository) ConsumeLegacy(ctx context.Context, tokenHash st
 		return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: insert marker: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, ip, user_agent)
-		 VALUES (?, ?, ?, ?, ?, ?, '', 'legacy_upgrade')`,
-		next.ID, next.UserID, next.FamilyID, next.TokenHash, fmtTime(next.IssuedAt), fmtTime(next.ExpiresAt)); err != nil {
+		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, ip, user_agent, credential_version)
+		 VALUES (?, ?, ?, ?, ?, ?, '', 'legacy_upgrade', ?)`,
+		next.ID, next.UserID, next.FamilyID, next.TokenHash, fmtTime(next.IssuedAt), fmtTime(next.ExpiresAt), next.CredentialVersion); err != nil {
 		return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: insert next: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.RotateNotFound, fmt.Errorf("refresh.ConsumeLegacy: commit: %w", err)
 	}
 	return domain.RotateOK, nil
+}
+
+// UpdatePasswordAtomic mengganti hash password, menaikkan credential_version, dan
+// mencabut semua keluarga token dalam satu transaksi. Dipakai ChangePassword dan
+// ResetPassword supaya tidak ada jendela di mana login lama masih bisa refresh.
+func (r *RefreshTokenRepository) UpdatePasswordAtomic(ctx context.Context, userID, newHash, reason string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("refresh.UpdatePasswordAtomic: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := fmtTime(time.Now().UTC())
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE users SET password_hash = ?, credential_version = credential_version + 1 WHERE id = ?`,
+		newHash, userID); err != nil {
+		return fmt.Errorf("refresh.UpdatePasswordAtomic: user: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE refresh_tokens SET revoked_at = ?, revoked_reason = ?
+		  WHERE user_id = ? AND revoked_at IS NULL`, now, reason, userID); err != nil {
+		return fmt.Errorf("refresh.UpdatePasswordAtomic: revoke: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("refresh.UpdatePasswordAtomic: commit: %w", err)
+	}
+	return nil
 }

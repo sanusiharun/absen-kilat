@@ -41,6 +41,23 @@ type AuthService struct {
 	tokens domain.RefreshTokenRepository
 }
 
+// LoadLegacyRefreshCutoff membaca LEGACY_REFRESH_ACCEPT_UNTIL (RFC3339). Bila tidak
+// diset atau tidak valid, cutoff dibiarkan nol sehingga token legacy DITOLAK
+// (fail closed) — bukan lagi "7 hari sejak proses start" (C2).
+func (s *AuthService) LoadLegacyRefreshCutoff(env func(string) string) {
+	raw := strings.TrimSpace(env("LEGACY_REFRESH_ACCEPT_UNTIL"))
+	if raw == "" {
+		slog.Warn("auth: LEGACY_REFRESH_ACCEPT_UNTIL tidak diset — token legacy akan ditolak")
+		return
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		slog.Error("auth: LEGACY_REFRESH_ACCEPT_UNTIL tidak valid — token legacy ditolak", "value", raw)
+		return
+	}
+	s.legacyDeadline = ts
+}
+
 // SetLegacyRefreshCutoff menetapkan batas waktu penerimaan token legacy.
 func (s *AuthService) SetLegacyRefreshCutoff(t time.Time) { s.legacyDeadline = t }
 
@@ -55,11 +72,12 @@ func NewAuthServiceWithTokens(users domain.UserRepository, secret string, tokens
 // NewAuthService creates an AuthService.
 func NewAuthService(users domain.UserRepository, secret string) *AuthService {
 	return &AuthService{
-		users:          users,
-		secret:         []byte(secret),
-		accessTTL:      15 * time.Minute,
-		refreshTTL:     30 * 24 * time.Hour,
-		legacyDeadline: time.Now().Add(7 * 24 * time.Hour),
+		users:      users,
+		secret:     []byte(secret),
+		accessTTL:  15 * time.Minute,
+		refreshTTL: 30 * 24 * time.Hour,
+		// legacyDeadline sengaja NOL sampai diset eksplisit: token legacy ditolak
+		// bila cutoff tidak dikonfigurasi (fail closed, C2).
 	}
 }
 
@@ -171,9 +189,9 @@ func (s *AuthService) refreshLegacyStateless(ctx context.Context, refreshToken s
 // refreshLegacyUpgrade menerima JWT refresh lama lalu menerbitkan token opaque
 // (upgrade bertahap, tanpa logout massal).
 func (s *AuthService) refreshLegacyUpgrade(ctx context.Context, refreshToken string) (*TokenPair, error) {
-	if !s.legacyDeadline.IsZero() && time.Now().UTC().After(s.legacyDeadline) {
-		// Cutoff release+7d: token legacy tidak lagi diterima.
-		slog.Info("auth: legacy_refresh ditolak karena melewati cutoff", "cutoff", s.legacyDeadline.Format(time.RFC3339))
+	if s.legacyDeadline.IsZero() || time.Now().UTC().After(s.legacyDeadline) {
+		// Tanpa cutoff eksplisit atau sudah lewat cutoff: token legacy ditolak.
+		slog.Info("auth: legacy_refresh ditolak", "cutoff_set", !s.legacyDeadline.IsZero())
 		return nil, pkgerrors.Unauthorized("invalid or expired refresh token")
 	}
 	claims, err := s.parseToken(refreshToken, tokenTypeRefresh)
@@ -272,12 +290,13 @@ func (s *AuthService) ResetPassword(ctx context.Context, resetToken, newPassword
 	if err != nil {
 		return fmt.Errorf("service.AuthService.ResetPassword: hash: %w", err)
 	}
-	// Fail closed: sesi dicabut lebih dulu. Bila pencabutan gagal, password TIDAK
-	// diubah (arah aman: sesi lama tetap tercabut, password tetap lama).
+	// Atomik: hash + credential_version + pencabutan keluarga token dalam satu
+	// transaksi (C4). Bila gagal, tidak ada perubahan sebagian.
 	if s.tokens != nil {
-		if rerr := s.tokens.RevokeAllForUser(ctx, userID, "password_change"); rerr != nil {
-			return fmt.Errorf("service.AuthService.ResetPassword: revoke sessions: %w", rerr)
+		if rerr := s.tokens.UpdatePasswordAtomic(ctx, userID, string(hash), "password_change"); rerr != nil {
+			return fmt.Errorf("service.AuthService.ResetPassword: update atomik: %w", rerr)
 		}
+		return nil
 	}
 	user.PasswordHash = string(hash)
 	return s.users.Update(ctx, user)
@@ -301,9 +320,10 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID, currentPasswor
 		return fmt.Errorf("service.AuthService.ChangePassword: hash: %w", err)
 	}
 	if s.tokens != nil {
-		if rerr := s.tokens.RevokeAllForUser(ctx, userID, "password_change"); rerr != nil {
-			return fmt.Errorf("service.AuthService.ChangePassword: revoke sessions: %w", rerr)
+		if rerr := s.tokens.UpdatePasswordAtomic(ctx, userID, string(hash), "password_change"); rerr != nil {
+			return fmt.Errorf("service.AuthService.ChangePassword: update atomik: %w", rerr)
 		}
+		return nil
 	}
 	user.PasswordHash = string(hash)
 	return s.users.Update(ctx, user)
@@ -326,7 +346,14 @@ func (s *AuthService) issueTokens(ctx context.Context, userID string) (*TokenPai
 		return nil, fmt.Errorf("service.AuthService.issueTokens: access: %w", err)
 	}
 	if s.tokens != nil {
+		user, uerr := s.users.FindByID(ctx, userID)
+		if uerr != nil {
+			return nil, uerr
+		}
 		row, raw, terr := s.newRefreshToken(userID, "", "")
+		if terr == nil {
+			row.CredentialVersion = user.CredentialVersion
+		}
 		if terr != nil {
 			return nil, terr
 		}
