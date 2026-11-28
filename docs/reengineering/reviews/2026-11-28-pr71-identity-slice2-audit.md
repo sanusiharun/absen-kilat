@@ -87,3 +87,40 @@ TestProbe_CrossPoolRace               FAIL (loser: database is locked (517))
 ```
 
 Tidak ada nilai credential, secret, token mentah, atau PII di dokumen ini.
+
+## Verifikasi ulang pasca-merge — head `9ca67c9` (task `7230848861`)
+
+Review `7230848861` (2026-11-28T00:21:30Z) meminta probe audit `7230473398` dijalankan ulang pada head persis. Fakta keadaan repo saat audit ini:
+
+- PR #71 **sudah di-merge owner** `sanusiharun` pada `2026-11-28T00:17:32Z` (merge commit `61b6629ab05cb0235be7e151d26e77670fb39994`), yaitu **4 menit sebelum** review `7230848861` diposting. Head yang di-merge: `9ca67c9645958bc7bb619449b7ae72a61c892a7d`.
+- Artinya temuan di bawah ini berada di `main`, bukan di PR terbuka. Koreksi memerlukan branch `feat/*` baru + PR baru setelah approval owner.
+
+### Metode
+`git archive 9ca67c9` → `/tmp/probe-9ca` (repo tidak disentuh), `go build ./...` OK, `go vet` OK, lalu 6 probe lama + 2 probe baru (jendela race ganti password, sifat cutoff) dijalankan pada head tersebut.
+
+### Hasil probe pada `9ca67c9`
+
+| Probe | Status di `0d0889c` | Status di `9ca67c9` | Catatan |
+|---|---|---|---|
+| `TestProbe_LegacyReplaySequential` | FAIL (replay diterima 2×) | **PASS** | `ConsumeLegacy` + marker atomik bekerja; replay ⇒ 401 |
+| `TestProbe_MalformedExpiryFailOpen` | FAIL (outcome `ok`) | **PASS** | outcome `expired` (fail closed) |
+| `TestProbe_RevocationFailureSwallowed` | FAIL (error ditelan) | **PASS** | `ChangePassword` meneruskan `revoke sessions: …` |
+| `TestProbe_CrossPoolRace` | FAIL (`database is locked (517)`) | **PASS** | dua pool: `outcomes=[replay ok]`, `errs=[nil nil]` — `_txlock=immediate` menutup kelas lock-upgrade |
+| `TestProbe_ReuseGraceWindow` | FAIL | **FAIL** | reuse segera ⇒ family dicabut; tidak ada parameter grace di `AuthService`/`Rotate` |
+| `TestProbe_ConcurrentWinnerTokenUsable` | FAIL | **FAIL** | token pemenang ikut tidak bisa dipakai |
+| `TestProbe_PasswordChangeRaceWindow` (baru) | — | **FAIL** | sesi yang terbit di jendela revoke→update hash **selamat** setelah password berubah |
+| `TestProbe_LegacyCutoffRelativeToProcess` (baru) | — | **CONFIRMED** | `legacyDeadline = now + 168h`; bergeser tiap proses start |
+
+### Tiga temuan review `7230848861` — semuanya tereproduksi
+
+1. **Grace R3 masih tidak ada.** `refresh_token_repo.go` `Rotate`: setiap `consumed_at` terisi ⇒ `revokeFamilyTx(..., "replay")` tanpa cek selisih waktu. Tidak ada `grace`/`GraceWindow` di kode (`grep -n grace internal/**` kosong). Tes I13/I23 juga tidak ada.
+2. **Cutoff legacy relatif, bukan absolut.** `NewAuthService` (`auth_service.go:62`) menyetel `legacyDeadline: time.Now().Add(7 * 24 * time.Hour)`. `SetLegacyRefreshCutoff` hanya *setter*; produksi tidak pernah memanggilnya dengan tanggal rilis tetap. Restart/redeploy memperpanjang masa terima token legacy tanpa batas.
+3. **Ganti password tidak atomik.** `ChangePassword` (`auth_service.go:303-309`) menjalankan `RevokeAllForUser` **lalu** `users.Update` di dua transaksi terpisah. Di antara keduanya password lama masih valid sehingga `Login` bisa menerbitkan family baru yang tidak ikut tercabut — dibuktikan probe `TestProbe_PasswordChangeRaceWindow`.
+
+### Kenapa 11 tes rotasi & CI tetap hijau
+`go test ./internal/service -run TestRotation -count=1` → 11/11 PASS pada `9ca67c9`. Namun tidak ada satu pun tes yang menguji grace, pemenang-konkuren, cutoff absolut, atau serialisasi revoke-vs-update. CI hijau hanya membuktikan tes yang ada lulus.
+
+### Status
+Perbaikan menyentuh kode runtime + semantik keamanan (R3 grace, cutoff absolut, transaksi ganti password) ⇒ **butuh approval owner via DM Telegram** dengan binding change+gate+base/head+digest+plan hash. Belum ada perubahan kode aplikasi dari tick ini; dokumen ini satu-satunya tulisan (docs-only).
+
+Tidak ada credential, secret, token mentah, atau PII di dokumen ini.
