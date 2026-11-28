@@ -93,3 +93,13 @@ situ — bukan menebak atau memintas batas.
   PASS. Approval owner tidak boleh mem-bypass gate kualitas.
 - Bila approval belum dijawab, **lanjutkan pekerjaan independen** yang tidak terblokir; delivery tidak
   boleh berhenti total karena satu approval pending.
+
+## 8. Update 2026-11-28 — merge oleh agent, deploy tetap owner
+
+- **Review dan merge PR boleh dilakukan agent** (termasuk Hermes) **tanpa approval owner** bila
+  memenuhi SEMUA syarat: acceptance criteria terpenuhi, **CI PASS**, dan **tidak ada security blocker**.
+- **Tetap butuh approval owner via Telegram**: deployment, perubahan credential/secret, biaya
+  tambahan, dan perluasan scope.
+- Dilarang idle hanya karena satu PR menunggu approval: stream lain (rate limiting, dashboard,
+  export CSV, agentic runtime) jalan paralel.
+- Prioritaskan working software; hindari approval berulang dan dokumentasi yang redundan.
