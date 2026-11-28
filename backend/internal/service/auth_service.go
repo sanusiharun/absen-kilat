@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -36,6 +37,12 @@ type AuthService struct {
 	// legacyDeadline membatasi sampai kapan token JWT lama masih diterima
 	// (release + 7 hari). Setelah itu token legacy ditolak.
 	legacyDeadline time.Time
+	// verifications adalah store token verifikasi email sekali pakai (R5).
+	verifications EmailVerificationStore
+	// mailer mengirim token verifikasi ke pemilik email. Nil = tidak tersedia.
+	mailer EmailSender
+	// production menandai lingkungan produksi: tanpa mailer, registrasi ditolak.
+	production bool
 	// tokens adalah store rotasi refresh token. Bila nil, service berjalan dalam
 	// mode legacy (JWT stateless) — hanya dipakai tes lama; main selalu mengisi.
 	tokens domain.RefreshTokenRepository
@@ -56,6 +63,13 @@ func (s *AuthService) LoadLegacyRefreshCutoff(env func(string) string) {
 		return
 	}
 	s.legacyDeadline = ts
+}
+
+// SetEmailSender memasang transport email. production=true berarti tanpa transport
+// registrasi DITOLAK (fail closed) — tidak ada token yang dikembalikan lewat API.
+func (s *AuthService) SetEmailSender(sender EmailSender, production bool) {
+	s.mailer = sender
+	s.production = production
 }
 
 // SetLegacyRefreshCutoff menetapkan batas waktu penerimaan token legacy.
@@ -103,6 +117,11 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 		return nil, fmt.Errorf("service.AuthService.Register: hash: %w", err)
 	}
 
+	if s.production && s.mailer == nil {
+		// Fail closed: tanpa transport email, akun tidak boleh dibuat karena
+		// pemilik email tidak akan pernah bisa memverifikasi.
+		return nil, pkgerrors.Internal(errNoEmailTransport)
+	}
 	user := &domain.User{
 		Email:               email,
 		PasswordHash:        string(hash),
@@ -111,6 +130,18 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 	}
 	if err := s.users.Create(ctx, user); err != nil {
 		return nil, err // already wrapped as conflict/internal by repo
+	}
+	// Terbitkan token verifikasi dan kirim ke PEMILIK EMAIL. Token tidak pernah
+	// dikembalikan ke klien: kepemilikan email harus dibuktikan lewat transport.
+	if s.verifications != nil && s.mailer != nil {
+		token, terr := s.IssueVerificationToken(ctx, user.ID)
+		if terr != nil {
+			return nil, terr
+		}
+		if serr := s.mailer.SendVerification(ctx, user.Email, token); serr != nil {
+			slog.Error("auth: gagal mengirim token verifikasi", "user_id", user.ID, "error", serr)
+			return nil, pkgerrors.Internal(serr)
+		}
 	}
 	return user, nil
 }
@@ -248,12 +279,23 @@ func (s *AuthService) ParseAccessToken(tokenString string) (string, error) {
 // The token is the user id itself for this pilot (no email transport);
 // a production deployment would issue a random, expiring token.
 func (s *AuthService) VerifyEmail(ctx context.Context, token string) error {
-	user, err := s.users.FindByID(ctx, token)
-	if err != nil {
-		return pkgerrors.Validation("token", "invalid verification token")
+	if s.verifications == nil {
+		return pkgerrors.Internal(errors.New("verifikasi email belum dikonfigurasi"))
 	}
-	user.IsEmailVerified = true
-	return s.users.Update(ctx, user)
+	// Konsumsi token dan penandaan email terverifikasi terjadi dalam satu
+	// transaksi di repo: tidak ada jendela di mana token hangus tetapi status
+	// email belum berubah, dan pemakaian paralel hanya bisa berhasil sekali.
+	_, ok, err := s.verifications.ConsumeAndVerify(ctx, hashToken(token))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		// Token tidak dikenal, sudah dipakai, kedaluwarsa, atau kalah balapan.
+		// Token lama berbasis user id juga jatuh ke sini (ditolak).
+		// Spec R5/I11: replay token verifikasi dijawab 401, bukan 422.
+		return pkgerrors.Unauthorized("invalid verification token")
+	}
+	return nil
 }
 
 // ForgotPassword generates a reset token for the given email. The token is

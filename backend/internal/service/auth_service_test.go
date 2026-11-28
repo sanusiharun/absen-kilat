@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sanusi/absen-kilat/backend/internal/db"
 	"github.com/sanusi/absen-kilat/backend/internal/domain"
+	"github.com/sanusi/absen-kilat/backend/internal/repo"
 )
 
 type fakeUserRepo struct {
@@ -176,21 +179,45 @@ func TestAuthResetPassword(t *testing.T) {
 
 func TestVerifyEmail(t *testing.T) {
 	ctx := context.Background()
-	svc := NewAuthService(newFakeUserRepo(), "secret")
+	dir := t.TempDir()
+	pool, err := db.Open(ctx, filepath.Join(dir, "verify.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+	users := repo.NewUserRepository(pool)
+	svc := NewAuthService(users, "secret")
+	svc.SetEmailVerifications(repo.NewEmailVerificationRepository(pool))
 
 	user, err := svc.Register(ctx, "verify@example.com", "password123", "Ver")
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
-	if err := svc.VerifyEmail(ctx, user.ID); err != nil {
+	// Token berbasis user id (perilaku lama) HARUS ditolak (R5).
+	if err := svc.VerifyEmail(ctx, user.ID); err == nil {
+		t.Fatal("token berbasis user id harus ditolak")
+	}
+
+	token, err := svc.IssueVerificationToken(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueVerificationToken: %v", err)
+	}
+	if token == user.ID {
+		t.Fatal("token verifikasi tidak boleh sama dengan user id")
+	}
+	if err := svc.VerifyEmail(ctx, token); err != nil {
 		t.Fatalf("VerifyEmail: %v", err)
 	}
-	got, err := svc.users.FindByID(ctx, user.ID)
+	got, err := users.FindByID(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("FindByID: %v", err)
 	}
 	if !got.IsEmailVerified {
 		t.Fatal("email should be verified")
+	}
+	// Sekali pakai: pemakaian kedua harus ditolak.
+	if err := svc.VerifyEmail(ctx, token); err == nil {
+		t.Fatal("token verifikasi hanya boleh dipakai sekali")
 	}
 }
