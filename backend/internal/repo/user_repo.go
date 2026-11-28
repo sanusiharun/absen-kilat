@@ -39,6 +39,9 @@ type userDAO struct {
 	LeaveUsed           int
 	CreatedAt           string
 	UpdatedAt           string
+	// CredentialVersion menaik setiap password berubah; token dengan versi
+	// lama ditolak saat rotasi (C4).
+	CredentialVersion int
 }
 
 // UserRepository is the SQLite implementation of domain.UserRepository.
@@ -55,7 +58,7 @@ const userCols = `id, email, password_hash, name, avatar_path,
 	is_email_verified, notification_enabled, role, is_active,
 	nip, phone, department, position, address, join_date, manager_id, employee_code,
 	leave_quota, leave_used,
-	created_at, updated_at`
+	created_at, updated_at, credential_version`
 
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	if u.ID == "" {
@@ -132,7 +135,7 @@ func (r *UserRepository) ListByManager(ctx context.Context, managerID string) ([
 			&d.IsEmailVerified, &d.NotificationEnabled, &d.Role, &d.IsActive,
 			&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
 			&d.ManagerID, &d.EmployeeCode, &d.LeaveQuota, &d.LeaveUsed,
-			&d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.CreatedAt, &d.UpdatedAt, &d.CredentialVersion); err != nil {
 			return nil, fmt.Errorf("repo.UserRepository.ListByManager: scan: %w", err)
 		}
 		out = append(out, userFromDAO(d))
@@ -238,7 +241,7 @@ func (r *UserRepository) ListFiltered(ctx context.Context, search, status string
 			&d.IsEmailVerified, &d.NotificationEnabled, &d.Role, &d.IsActive,
 			&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
 			&d.ManagerID, &d.EmployeeCode, &d.LeaveQuota, &d.LeaveUsed,
-			&d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.CreatedAt, &d.UpdatedAt, &d.CredentialVersion); err != nil {
 			return nil, fmt.Errorf("repo.UserRepository.ListFiltered: scan: %w", err)
 		}
 		out = append(out, userFromDAO(d))
@@ -254,7 +257,7 @@ func scanUser(row *sql.Row) (*domain.User, error) {
 		&d.NIP, &d.Phone, &d.Department, &d.Position, &d.Address, &d.JoinDate,
 		&d.ManagerID, &d.EmployeeCode,
 		&d.LeaveQuota, &d.LeaveUsed,
-		&d.CreatedAt, &d.UpdatedAt)
+		&d.CreatedAt, &d.UpdatedAt, &d.CredentialVersion)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, pkgerrors.NotFound("user", "")
@@ -288,6 +291,7 @@ func userFromDAO(d userDAO) domain.User {
 		LeaveUsed:           d.LeaveUsed,
 		CreatedAt:           parseTime(d.CreatedAt),
 		UpdatedAt:           parseTime(d.UpdatedAt),
+		CredentialVersion:   d.CredentialVersion,
 	}
 	if d.ManagerID.Valid {
 		u.ManagerID = d.ManagerID.String

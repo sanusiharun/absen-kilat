@@ -534,3 +534,51 @@ func TestCorrective_PasswordChangeRaceOldLoginCannotRefresh(t *testing.T) {
 		t.Fatalf("token dari login lama harus ditolak, dapat: %v", err)
 	}
 }
+
+// C4 regresi: rotasi wajib mewarisi credential_version dari token induk.
+// Tanpa ini, user yang pernah ganti password (versi > 0) menerima token hasil
+// rotasi dengan versi 0 dan sesinya dicabut pada refresh berikutnya.
+func TestCorrective_RotationPreservesCredentialVersion(t *testing.T) {
+	ctx := context.Background()
+	pool, err := db.Open(ctx, filepath.Join(t.TempDir(), "cvrot.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	users := repo.NewUserRepository(pool)
+	tokens := repo.NewRefreshTokenRepository(pool)
+	svc := NewAuthServiceWithTokens(users, "secret", tokens)
+
+	if _, err := svc.Register(ctx, "cvrot@test.dev", "rahasia-panjang-123", "U"); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	u, err := users.FindByEmail(ctx, "cvrot@test.dev")
+	if err != nil {
+		t.Fatalf("FindByEmail: %v", err)
+	}
+	if err := svc.ChangePassword(ctx, u.ID, "rahasia-panjang-123", "rahasia-baru-456"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	_, pair, err := svc.Login(ctx, "cvrot@test.dev", "rahasia-baru-456")
+	if err != nil {
+		t.Fatalf("Login setelah ganti password: %v", err)
+	}
+
+	next, err := svc.Refresh(ctx, pair.RefreshToken)
+	if err != nil {
+		t.Fatalf("refresh pertama harus berhasil: %v", err)
+	}
+	var version int
+	if err := pool.QueryRowContext(ctx,
+		`SELECT credential_version FROM refresh_tokens WHERE token_hash = ?`,
+		hashToken(next.RefreshToken)).Scan(&version); err != nil {
+		t.Fatalf("baca versi token hasil rotasi: %v", err)
+	}
+	if version == 0 {
+		t.Fatalf("token hasil rotasi mewarisi versi 0, seharusnya versi user (>=1)")
+	}
+	if _, err := svc.Refresh(ctx, next.RefreshToken); err != nil {
+		t.Fatalf("refresh kedua harus tetap berhasil, dapat: %v", err)
+	}
+}
