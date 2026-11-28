@@ -135,7 +135,11 @@ func main() {
 	// photoStore adapts storage.Store to transport.photoStorer.
 	photoStore := &photoStoreAdapter{Dir: cfg.UploadDir}
 
-	authHandler := transport.NewAuthHandler(authSvc)
+	authHandler := transport.NewAuthHandlerWithRateLimits(
+		authSvc,
+		service.NewAuthRateLimiter(repo.NewAuthRateLimitRepository(pool)),
+		trustedProxies(logger, cfg.TrustedProxies),
+	)
 	attendanceHandler := transport.NewAttendanceHandler(attendanceSvc, photoStore)
 	profileHandler := transport.NewProfileHandler(profileSvc, photoStore, authSvc)
 	notificationHandler := transport.NewNotificationHandler(notificationSvc)
@@ -259,6 +263,19 @@ func newLogger(env string) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stdout, opts))
+}
+
+// trustedProxies builds the client-IP resolver for auth rate limiting. A typo
+// in TRUSTED_PROXIES is surfaced loudly and falls back to "no trusted proxy"
+// (fail closed: X-Forwarded-For then ignored, RemoteAddr used).
+func trustedProxies(logger *slog.Logger, raw string) *transport.ClientIPResolver {
+	resolver, err := transport.NewClientIPResolver(raw)
+	if err != nil {
+		logger.Error("TRUSTED_PROXIES tidak valid; X-Forwarded-For diabaikan", "error", err)
+		empty, _ := transport.NewClientIPResolver("")
+		return empty
+	}
+	return resolver
 }
 
 // parseWorkdays reads working weekdays from settings (["mon".."sun"]) and maps

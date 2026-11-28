@@ -25,11 +25,21 @@ type authService interface {
 // AuthHandler wires auth endpoints onto a router.
 type AuthHandler struct {
 	svc authService
+	// limiter dan clientIP opsional; bila nil, pembatasan tidak aktif (tes lama).
+	limiter  *service.AuthRateLimiter
+	clientIP *ClientIPResolver
 }
 
-// NewAuthHandler creates an AuthHandler.
+// NewAuthHandler creates an AuthHandler without rate limiting. Dipakai tes yang
+// tidak menguji pembatasan; produksi memakai NewAuthHandlerWithRateLimits.
 func NewAuthHandler(svc authService) *AuthHandler {
 	return &AuthHandler{svc: svc}
+}
+
+// NewAuthHandlerWithRateLimits creates an AuthHandler with auth rate limiting
+// (identity-hardening R4) and trusted-proxy aware client IP resolution.
+func NewAuthHandlerWithRateLimits(svc authService, limiter *service.AuthRateLimiter, resolver *ClientIPResolver) *AuthHandler {
+	return &AuthHandler{svc: svc, limiter: limiter, clientIP: resolver}
 }
 
 // RegisterRoutes mounts the auth routes under r.
@@ -119,8 +129,15 @@ func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := h.clientIPOf(r)
+	if h.rateBlocked(r.Context(), ip, req.Email, service.ScopeLoginIP, service.ScopeLoginAccount) {
+		httpx.WriteHTTPError(w, httpx.ErrTooManyRequests)
+		return
+	}
+
 	user, pair, err := h.svc.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
+		h.recordAttempt(r.Context(), ip, req.Email, service.ScopeLoginIP, service.ScopeLoginAccount)
 		httpx.WriteError(w, err)
 		return
 	}
@@ -158,6 +175,13 @@ func (h *AuthHandler) verifyEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := h.clientIPOf(r)
+	if h.rateBlocked(r.Context(), ip, "", service.ScopeVerifyEmailIP, "") {
+		httpx.WriteHTTPError(w, httpx.ErrTooManyRequests)
+		return
+	}
+	h.recordAttempt(r.Context(), ip, "", service.ScopeVerifyEmailIP, "")
+
 	if err := h.svc.VerifyEmail(r.Context(), req.Token); err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -174,6 +198,14 @@ func (h *AuthHandler) forgotPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Always respond success (even when the email is unknown) to avoid
 	// leaking which accounts exist.
+	ip := h.clientIPOf(r)
+	if h.rateBlocked(r.Context(), ip, req.Email, service.ScopeForgotIP, service.ScopeForgotAccount) {
+		httpx.WriteHTTPError(w, httpx.ErrTooManyRequests)
+		return
+	}
+	h.recordAttempt(r.Context(), ip, req.Email, service.ScopeForgotIP, service.ScopeForgotAccount)
+	// Setiap permintaan dihitung, termasuk email tak dikenal, supaya respons
+	// tetap identik dan penghitung tidak bisa dihindari dengan email acak.
 	token, err := h.svc.ForgotPassword(r.Context(), req.Email)
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -190,11 +222,54 @@ func (h *AuthHandler) resetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := h.clientIPOf(r)
+	if h.rateBlocked(r.Context(), ip, "", service.ScopeResetIP, "") {
+		httpx.WriteHTTPError(w, httpx.ErrTooManyRequests)
+		return
+	}
+	h.recordAttempt(r.Context(), ip, "", service.ScopeResetIP, "")
+
 	if err := h.svc.ResetPassword(r.Context(), req.Token, req.NewPassword); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 	httpx.WriteOK(w, map[string]bool{"reset": true})
+}
+
+// clientIPOf resolves the client IP, honouring trusted proxies when configured.
+func (h *AuthHandler) clientIPOf(r *http.Request) string {
+	if h.clientIP != nil {
+		return h.clientIP.Resolve(r)
+	}
+	return clientIP(r.RemoteAddr)
+}
+
+// rateBlocked reports whether the request must be refused with the generic 429.
+// Store errors fail closed: a limiter that cannot read state refuses the request.
+func (h *AuthHandler) rateBlocked(ctx context.Context, ip, account, ipScope, accountScope string) bool {
+	if h.limiter == nil {
+		return false
+	}
+	if ok, err := h.limiter.Allowed(ctx, ipScope, ip); err != nil || !ok {
+		return true
+	}
+	if accountScope != "" {
+		if ok, err := h.limiter.Allowed(ctx, accountScope, account); err != nil || !ok {
+			return true
+		}
+	}
+	return false
+}
+
+// recordAttempt menambah penghitung untuk scope IP (dan akun bila ada).
+func (h *AuthHandler) recordAttempt(ctx context.Context, ip, account, ipScope, accountScope string) {
+	if h.limiter == nil {
+		return
+	}
+	_ = h.limiter.Record(ctx, ipScope, ip)
+	if accountScope != "" {
+		_ = h.limiter.Record(ctx, accountScope, account)
+	}
 }
 
 // decodeJSON decodes a JSON body into v, rejecting unknown trailing data.
