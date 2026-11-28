@@ -16,5 +16,6 @@ Baseline source: 0413c9ccdeb0 (main setelah PR #54, #55, #68; sebelumnya d082b13
 - design/DESIGN_SYSTEM.md
 - features/INDEX.md
 - ../../openspec/changes/dashboard-redesign/proposal.md
+- ../../openspec/changes/pilot-export-csv/proposal.md — pilot slice 1 (export CSV + ringkasan), G1/G2 pending
 Hermes runtime dispatch is disabled until onboarding and acceptance.
 - reviews/2026-11-28-pr71-identity-slice2-audit.md — audit read-only PR #71 (R3/R8, task 7230320388)
