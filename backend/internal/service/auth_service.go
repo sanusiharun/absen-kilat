@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -36,6 +37,8 @@ type AuthService struct {
 	// legacyDeadline membatasi sampai kapan token JWT lama masih diterima
 	// (release + 7 hari). Setelah itu token legacy ditolak.
 	legacyDeadline time.Time
+	// verifications adalah store token verifikasi email sekali pakai (R5).
+	verifications EmailVerificationStore
 	// tokens adalah store rotasi refresh token. Bila nil, service berjalan dalam
 	// mode legacy (JWT stateless) — hanya dipakai tes lama; main selalu mengisi.
 	tokens domain.RefreshTokenRepository
@@ -248,9 +251,21 @@ func (s *AuthService) ParseAccessToken(tokenString string) (string, error) {
 // The token is the user id itself for this pilot (no email transport);
 // a production deployment would issue a random, expiring token.
 func (s *AuthService) VerifyEmail(ctx context.Context, token string) error {
-	user, err := s.users.FindByID(ctx, token)
+	if s.verifications == nil {
+		return pkgerrors.Internal(errors.New("verifikasi email belum dikonfigurasi"))
+	}
+	userID, ok, err := s.verifications.Consume(ctx, hashToken(token))
 	if err != nil {
+		return err
+	}
+	if !ok {
+		// Token acak yang tidak dikenal, sudah dipakai, atau kedaluwarsa.
+		// Token lama berbasis user id juga jatuh ke sini (ditolak).
 		return pkgerrors.Validation("token", "invalid verification token")
+	}
+	user, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err
 	}
 	user.IsEmailVerified = true
 	return s.users.Update(ctx, user)

@@ -72,6 +72,7 @@ func main() {
 	}
 	authSvc := service.NewAuthServiceWithTokens(userRepo, cfg.JWTSecret, refreshRepo)
 	authSvc.LoadLegacyRefreshCutoff(os.Getenv)
+	authSvc.SetEmailVerifications(repo.NewEmailVerificationRepository(pool))
 	attendanceSvc := service.NewAttendanceService(attendanceRepo, locationRepo, settingsSvc, cfg.CutoffHour, service.OfficeConfig{
 		Lat:     cfg.OfficeLat,
 		Lng:     cfg.OfficeLng,
