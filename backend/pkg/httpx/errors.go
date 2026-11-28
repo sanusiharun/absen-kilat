@@ -49,6 +49,13 @@ var (
 		Code:       "UNPROCESSABLE_ENTITY",
 		Message:    "the request was well-formed but contained semantic errors",
 	}
+	// ErrTooManyRequests is the generic response for rate-limited auth attempts.
+	// It never reveals whether the account exists.
+	ErrTooManyRequests = &HTTPError{
+		StatusCode: http.StatusTooManyRequests,
+		Code:       "TOO_MANY_REQUESTS",
+		Message:    "terlalu banyak percobaan, silakan coba lagi nanti",
+	}
 	ErrInternal = &HTTPError{
 		StatusCode: http.StatusInternalServerError,
 		Code:       "INTERNAL_SERVER_ERROR",
