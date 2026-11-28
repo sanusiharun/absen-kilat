@@ -24,6 +24,7 @@ type adminService interface {
 	Reports(ctx context.Context, loc *time.Location, days int) ([]service.DayReport, error)
 	UserReports(ctx context.Context, loc *time.Location, days int) ([]service.UserReport, error)
 	ExportAttendance(ctx context.Context, loc *time.Location, from, to string) ([]service.ExportRow, error)
+	SummaryReports(ctx context.Context, loc *time.Location, from, to string) (*service.ReportSummary, error)
 	Locations(ctx context.Context, limit int) ([]domain.LocationStat, error)
 	ListAttendances(ctx context.Context, f service.AttendanceFilter) ([]service.AdminAttendance, int, error)
 	CreateUser(ctx context.Context, in service.CreateUserInput) (*domain.User, error)
@@ -68,6 +69,7 @@ func (h *AdminHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/admin/reports", h.reports)
 	r.Get("/admin/reports/users", h.userReports)
 	r.Get("/admin/reports/export", h.reportsExport)
+	r.Get("/admin/reports/summary", h.reportsSummary)
 	r.Get("/admin/attendance", h.attendance)
 	r.Patch("/admin/attendance/{id}", h.overrideAttendance)
 	r.Get("/admin/devices", h.devices)
@@ -821,4 +823,15 @@ func (h *AdminHandler) reportsExport(w http.ResponseWriter, r *http.Request) {
 		// Header sudah terkirim; kegagalan tulis hanya bisa dicatat.
 		slog.Error("reports: gagal menulis CSV", "error", werr)
 	}
+}
+
+// reportsSummary menyajikan ringkasan kehadiran per hari pada rentang tanggal.
+func (h *AdminHandler) reportsSummary(w http.ResponseWriter, r *http.Request) {
+	sum, err := h.svc.SummaryReports(r.Context(), time.Local,
+		r.URL.Query().Get("from"), r.URL.Query().Get("to"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.WriteOK(w, sum)
 }
