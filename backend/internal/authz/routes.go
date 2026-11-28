@@ -44,6 +44,7 @@ var routes = []RouteRule{
 	// Laporan
 	{"GET", "/admin/reports", Permission("laporan", ActionView)},
 	{"GET", "/admin/reports/users", Permission("laporan", ActionView)},
+	{"GET", "/admin/reports/export", Permission("laporan", ActionExport)},
 
 	// Device
 	{"GET", "/admin/devices", Permission("device", ActionView)},
