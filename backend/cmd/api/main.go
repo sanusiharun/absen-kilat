@@ -73,12 +73,13 @@ func main() {
 	authSvc := service.NewAuthServiceWithTokens(userRepo, cfg.JWTSecret, refreshRepo)
 	authSvc.LoadLegacyRefreshCutoff(os.Getenv)
 	authSvc.SetEmailVerifications(repo.NewEmailVerificationRepository(pool))
-	// Transport email: belum ada transport berbayar. Di non-production dipakai mock
-	// yang hanya mencatat token di log server; di production registrasi ditolak
-	// (fail closed) sampai transport sungguhan dikonfigurasi.
-	if cfg.Env != "production" {
-		authSvc.SetEmailSender(service.NewLogEmailSender(), false)
+	// Transport email: SMTP standar (stdlib, tanpa biaya). Konfigurasi dibaca dari
+	// environment yang dimuat systemd dari file di luar repo. Bila tidak lengkap,
+	// registrasi DITOLAK (fail closed) dan tidak ada token yang bocor lewat API.
+	if sender, ok := service.NewSMTPEmailSenderFromEnv(os.Getenv); ok {
+		authSvc.SetEmailSender(sender, cfg.Env == "production")
 	} else {
+		slog.Warn("email: transport belum dikonfigurasi — registrasi akan ditolak (fail closed)")
 		authSvc.SetEmailSender(nil, true)
 	}
 	attendanceSvc := service.NewAttendanceService(attendanceRepo, locationRepo, settingsSvc, cfg.CutoffHour, service.OfficeConfig{
