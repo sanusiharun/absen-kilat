@@ -103,3 +103,21 @@ situ — bukan menebak atau memintas batas.
 - Dilarang idle hanya karena satu PR menunggu approval: stream lain (rate limiting, dashboard,
   export CSV, agentic runtime) jalan paralel.
 - Prioritaskan working software; hindari approval berulang dan dokumentasi yang redundan.
+
+## 9. Penyederhanaan 2026-11-28 (menggantikan gate per fitur)
+
+| Kelas pekerjaan | Izin |
+|---|---|
+| **Fitur bisnis di dalam scope proposal** | **langsung dikembangkan**, tanpa approval G1/G2 per fitur |
+| **PR rutin** (bukan security-sensitive, tidak deploy) | agent boleh **review + merge** bila **CI PASS** dan **acceptance test PASS** |
+| Temuan **Medium nonblocking** dan **Low** | masuk **backlog**, tidak memblokir merge |
+| **Security-sensitive changes** | approval owner via Telegram |
+| **Deployment** | approval owner via Telegram |
+| **Perubahan credential/secret** | approval owner via Telegram |
+| **Tambahan biaya** | approval owner via Telegram |
+| **Perluasan scope di luar proposal** | approval owner via Telegram |
+
+Prioritas pengembangan: dashboard, reporting, export CSV, shift management, lalu fitur proposal lainnya.
+Tidak boleh idle menunggu approval untuk pekerjaan independen.
+
+Dokumen ini satu-satunya sumber kebijakan; dokumen kebijakan lain bersifat rujukan dan tidak boleh menduplikasi aturan ini.
